@@ -46,7 +46,7 @@ export default function TradingViewWidget({
   return (
     <div className={expanded ? 'fixed inset-0 z-30 bg-slate-950 flex flex-col' : 'relative'}>
       {/* Toolbar */}
-      <div className={`flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-900 ${expanded ? '' : 'rounded-t-none'}`}>
+      <div className={`relative z-50 flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-900 ${expanded ? '' : 'rounded-t-none'}`}>
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold text-white">{symbol}</span>
           <span className="text-slate-500">·</span>
