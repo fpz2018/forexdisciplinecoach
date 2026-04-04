@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useApp } from '@/lib/context/AppContext'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, cn } from '@/lib/utils'
+import { learnFromTrade } from '@/lib/learning'
 import { X, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
 import type { Trade } from '@/lib/supabase/types'
 
@@ -54,6 +55,13 @@ export default function OpenPositions() {
               closed_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             }).eq('id', closingTrade.id)
+
+            // Self-learning: adjust criteria weights based on outcome
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user && closingTrade.indicator_snapshot) {
+              const snapshot = closingTrade.indicator_snapshot as Record<string, number | boolean>
+              await learnFromTrade(user.id, snapshot, resultPips > 0)
+            }
 
             await refreshTrades()
             setClosingTrade(null)

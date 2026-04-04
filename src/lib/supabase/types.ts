@@ -92,6 +92,8 @@ export type Database = {
           lot_size: number
           checklist_completed: boolean
           checklist_items: Json
+          indicator_snapshot: Json | null
+          analysis_score: number | null
           status: 'OPEN' | 'CLOSED' | 'CANCELLED'
           close_price: number | null
           close_reason: 'SL' | 'TP' | 'MANUAL' | null
@@ -113,6 +115,8 @@ export type Database = {
           lot_size: number
           checklist_completed?: boolean
           checklist_items?: Json
+          indicator_snapshot?: Json | null
+          analysis_score?: number | null
           status?: 'OPEN' | 'CLOSED' | 'CANCELLED'
           close_price?: number | null
           close_reason?: 'SL' | 'TP' | 'MANUAL' | null
@@ -134,6 +138,8 @@ export type Database = {
           lot_size?: number
           checklist_completed?: boolean
           checklist_items?: Json
+          indicator_snapshot?: Json | null
+          analysis_score?: number | null
           status?: 'OPEN' | 'CLOSED' | 'CANCELLED'
           close_price?: number | null
           close_reason?: 'SL' | 'TP' | 'MANUAL' | null
@@ -141,6 +147,48 @@ export type Database = {
           result_money?: number | null
           notes?: string | null
           closed_at?: string | null
+        }
+        Relationships: []
+      }
+      trade_criteria: {
+        Row: {
+          id: string
+          user_id: string
+          key: string
+          label: string
+          description: string | null
+          weight: number
+          enabled: boolean
+          auto_learn: boolean
+          win_count: number
+          loss_count: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          key: string
+          label: string
+          description?: string | null
+          weight?: number
+          enabled?: boolean
+          auto_learn?: boolean
+          win_count?: number
+          loss_count?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          key?: string
+          label?: string
+          description?: string | null
+          weight?: number
+          enabled?: boolean
+          auto_learn?: boolean
+          win_count?: number
+          loss_count?: number
+          created_at?: string
         }
         Relationships: []
       }
@@ -189,6 +237,7 @@ export type Profile = Database['public']['Tables']['profiles']['Row']
 export type Trade = Database['public']['Tables']['trades']['Row']
 export type TradingWindow = Database['public']['Tables']['trading_windows']['Row']
 export type DailyStat = Database['public']['Tables']['daily_stats']['Row']
+export type TradeCriterion = Database['public']['Tables']['trade_criteria']['Row']
 
 export type ChecklistItems = {
   trend_check: boolean

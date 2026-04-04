@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '@/lib/context/AppContext'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Trash2, Save, Clock, Bell, Calendar, Ban } from 'lucide-react'
+import { Plus, Trash2, Save, Clock, Bell, Calendar, Ban, Brain, RotateCcw, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { TradingWindow } from '@/lib/supabase/types'
+import { ensureCriteriaExist, DEFAULT_CRITERIA } from '@/lib/learning'
+import type { TradingWindow, TradeCriterion } from '@/lib/supabase/types'
 
 const PAIRS = ['GBPUSD', 'EURUSD', 'GBPJPY', 'EURJPY', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'EURGBP']
 
@@ -41,6 +42,20 @@ export default function SettingsPage() {
   const [newStart, setNewStart] = useState('07:00')
   const [newEnd, setNewEnd] = useState('09:00')
   const [savingWindow, setSavingWindow] = useState(false)
+
+  // Criteria state
+  const [criteria, setCriteria] = useState<TradeCriterion[]>([])
+  const [savingCriteria, setSavingCriteria] = useState(false)
+  const [criteriaMsg, setCriteriaMsg] = useState('')
+
+  const loadCriteria = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const list = await ensureCriteriaExist(user.id)
+    setCriteria(list.sort((a, b) => b.weight - a.weight))
+  }, [supabase])
+
+  useEffect(() => { loadCriteria() }, [loadCriteria])
 
   useEffect(() => {
     if (profile) {
@@ -102,6 +117,32 @@ export default function SettingsPage() {
     if (!profile) return
     await supabase.from('profiles').update({ blocked_dates: updated }).eq('id', profile.id)
     await refreshProfile()
+  }
+
+  const saveCriteria = async () => {
+    setSavingCriteria(true)
+    for (const c of criteria) {
+      await supabase.from('trade_criteria').update({
+        weight: c.weight,
+        enabled: c.enabled,
+        auto_learn: c.auto_learn,
+      }).eq('id', c.id)
+    }
+    setSavingCriteria(false)
+    setCriteriaMsg('Opgeslagen!')
+    setTimeout(() => setCriteriaMsg(''), 2000)
+  }
+
+  const resetCriteriaWeights = async () => {
+    const reset = criteria.map(c => {
+      const def = DEFAULT_CRITERIA.find(d => d.key === c.key)
+      return { ...c, weight: def?.weight ?? 16.67 }
+    })
+    setCriteria(reset)
+  }
+
+  const updateCriterion = (id: string, field: keyof TradeCriterion, value: number | boolean) => {
+    setCriteria(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
   }
 
   const addWindow = async () => {
@@ -291,6 +332,113 @@ export default function SettingsPage() {
         ) : (
           <p className="text-slate-600 text-sm">Geen datums geblokkeerd.</p>
         )}
+      </Section>
+
+      {/* Analyse Criteria */}
+      <Section title="Analyse Criteria & Gewichten" icon={<Brain className="w-4 h-4" />}>
+        <p className="text-slate-400 text-sm mb-4">
+          Het systeem leert automatisch van jouw trades (auto-leren aan). Je kunt gewichten ook zelf aanpassen.
+          De totaalScore moet ≥ 60 zijn voor een &quot;WEL DOEN&quot; advies.
+        </p>
+
+        {criteria.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Laden...</div>
+        ) : (
+          <div className="space-y-3">
+            {criteria.map(c => {
+              const winRate = c.win_count + c.loss_count > 0
+                ? Math.round((c.win_count / (c.win_count + c.loss_count)) * 100)
+                : null
+              return (
+                <div key={c.id} className={cn(
+                  'border rounded-xl p-4 transition-all',
+                  c.enabled ? 'border-slate-700 bg-slate-800/50' : 'border-slate-800 bg-slate-900 opacity-60'
+                )}>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white text-sm">{c.label}</span>
+                        {winRate !== null && (
+                          <span className={cn(
+                            'text-xs px-1.5 py-0.5 rounded font-medium',
+                            winRate >= 55 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                          )}>
+                            {winRate >= 55 ? <TrendingUp className="w-3 h-3 inline mr-0.5" /> : <TrendingDown className="w-3 h-3 inline mr-0.5" />}
+                            {winRate}% trefkans ({c.win_count}W/{c.loss_count}V)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">{c.description}</p>
+                    </div>
+                    {/* Enable toggle */}
+                    <button
+                      onClick={() => updateCriterion(c.id, 'enabled', !c.enabled)}
+                      className={cn(
+                        'w-10 h-6 rounded-full transition-all relative shrink-0',
+                        c.enabled ? 'bg-emerald-500' : 'bg-slate-600'
+                      )}
+                    >
+                      <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full transition-all', c.enabled ? 'left-5' : 'left-1')} />
+                    </button>
+                  </div>
+
+                  {/* Weight slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-400">
+                      <span>Gewicht</span>
+                      <span className="font-bold text-white">{Math.round(c.weight)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5}
+                      max={45}
+                      step={1}
+                      value={Math.round(c.weight)}
+                      onChange={e => updateCriterion(c.id, 'weight', parseFloat(e.target.value))}
+                      disabled={!c.enabled}
+                      className="w-full accent-emerald-500 disabled:opacity-30"
+                    />
+                  </div>
+
+                  {/* Auto-learn toggle */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      type="checkbox"
+                      id={`learn-${c.id}`}
+                      checked={c.auto_learn}
+                      onChange={e => updateCriterion(c.id, 'auto_learn', e.target.checked)}
+                      className="accent-emerald-500"
+                    />
+                    <label htmlFor={`learn-${c.id}`} className="text-xs text-slate-400 cursor-pointer">
+                      Auto-leren aan
+                    </label>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 mt-4">
+          <button
+            onClick={saveCriteria}
+            disabled={savingCriteria || criteria.length === 0}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+              criteriaMsg ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-500 hover:bg-emerald-400 text-white'
+            )}
+          >
+            <Save className="w-4 h-4" />
+            {criteriaMsg || (savingCriteria ? 'Opslaan...' : 'Criteria opslaan')}
+          </button>
+          <button
+            onClick={resetCriteriaWeights}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-white rounded-lg text-sm transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Reset gewichten
+          </button>
+        </div>
       </Section>
 
       {/* Trading Windows */}

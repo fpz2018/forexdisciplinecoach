@@ -1,55 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Info, ChevronRight, AlertTriangle } from 'lucide-react'
+import { X, ChevronRight, Loader2, TrendingUp, TrendingDown, CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useApp } from '@/lib/context/AppContext'
 import { calculateStopLoss, calculateTakeProfit, calculateLotSize, getPipValue, cn } from '@/lib/utils'
-import type { ChecklistItems } from '@/lib/supabase/types'
+import { ensureCriteriaExist } from '@/lib/learning'
+import type { CriterionResult, AnalysisResult } from '@/app/api/analyze/route'
 
 interface TradeModalProps {
   open: boolean
   onClose: () => void
 }
-
-const CHECKLIST_ITEMS = [
-  {
-    key: 'trend_check' as keyof ChecklistItems,
-    label: 'Trend Check',
-    description: 'Oranje EMA (11) staat boven Gele EMA (25) op 30min+ timeframe voor LONG / Onder voor SHORT',
-    tooltip: 'Controleer de EMAs op een hogere timeframe (30min of 1H). Voor een LONG trade wil je de snelle EMA (11) boven de langzame EMA (25) zien.',
-  },
-  {
-    key: 'channel_check' as keyof ChecklistItems,
-    label: 'Channel Check',
-    description: 'Prijs zit in onderste helft Donchian Channel (LONG) / Bovenste helft (SHORT)',
-    tooltip: 'Het Donchian Channel toont de high/low range van de laatste 9 perioden. Voor LONG: prijs zit in de onderste helft (koop bij steun). Voor SHORT: prijs in bovenste helft.',
-  },
-  {
-    key: 'pattern_check' as keyof ChecklistItems,
-    label: 'Patroon Check',
-    description: 'Higher lows patroon gezien (LONG: Rood-Groen-Rood met hogere low) / Lower highs (SHORT)',
-    tooltip: 'Zoek naar een bevestigd price action patroon. LONG: drie candles waarbij de middelste groen is en de derde candle een hogere low heeft dan de eerste. SHORT: omgekeerd.',
-  },
-  {
-    key: 'higher_tf_check' as keyof ChecklistItems,
-    label: 'Higher Timeframe Check',
-    description: 'Geen conflict met Daily/4H chart (prijs niet direct tegen EMA op hogere timeframe)',
-    tooltip: 'Check de Daily en 4H charts. Als de prijs tegen een sterke EMA aanloopt op hogere timeframe, vermijd dan een trade in die richting.',
-  },
-  {
-    key: 'mean_reversion_check' as keyof ChecklistItems,
-    label: 'Mean Reversion Check',
-    description: 'EMA\'s staan niet extreem ver uit elkaar (geen overbought/oversold situatie)',
-    tooltip: 'Als de twee EMAs extreem ver van elkaar staan, is de markt overstretched en is een correctie waarschijnlijker. Wacht op mean reversion voor betere entry.',
-  },
-  {
-    key: 'fomo_check' as keyof ChecklistItems,
-    label: 'FOMO Check',
-    description: 'Prijs heeft NIET in de laatste 5 minuten meer dan de drempelwaarde in pips bewogen',
-    tooltip: 'Als de prijs al fors is bewogen in korte tijd, is het gevaarlijk om er achteraan te gaan. Wacht op een betere entry of sla de trade over.',
-  },
-]
 
 const PAIRS = ['GBPUSD', 'EURUSD', 'GBPJPY', 'EURJPY', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'EURGBP']
 
@@ -57,42 +19,29 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
   const { profile, refreshTrades } = useApp()
   const supabase = createClient()
 
-  const [step, setStep] = useState<'checklist' | 'entry'>('checklist')
-  const [checklist, setChecklist] = useState<ChecklistItems>({
-    trend_check: false,
-    channel_check: false,
-    pattern_check: false,
-    higher_tf_check: false,
-    mean_reversion_check: false,
-    fomo_check: false,
-  })
-
+  const [step, setStep] = useState<'entry' | 'analysis' | 'confirm'>('entry')
   const [direction, setDirection] = useState<'LONG' | 'SHORT'>('LONG')
   const [pair, setPair] = useState(profile?.default_pair ?? 'GBPUSD')
   const [entryPrice, setEntryPrice] = useState('')
   const [lotSize, setLotSize] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [tooltip, setTooltip] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [overrideReason, setOverrideReason] = useState('')
 
   useEffect(() => {
     if (open) {
-      setStep('checklist')
-      setChecklist({
-        trend_check: false,
-        channel_check: false,
-        pattern_check: false,
-        higher_tf_check: false,
-        mean_reversion_check: false,
-        fomo_check: false,
-      })
-      setDirection('LONG')
+      setStep('entry')
+      setAnalysis(null)
+      setAnalyzeError(null)
+      setOverrideReason('')
       setPair(profile?.default_pair ?? 'GBPUSD')
       setEntryPrice('')
       setLotSize('')
     }
   }, [open, profile?.default_pair])
 
-  // Auto-calculate lot size when entry price changes
   useEffect(() => {
     if (entryPrice && profile) {
       const pipVal = getPipValue(pair)
@@ -101,15 +50,54 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
     }
   }, [entryPrice, pair, profile])
 
-  const allChecked = Object.values(checklist).every(Boolean)
-
   const entryNum = parseFloat(entryPrice)
   const sl = entryNum ? calculateStopLoss(entryNum, direction) : null
   const tp = entryNum ? calculateTakeProfit(entryNum, direction) : null
 
-  const handleSubmit = async () => {
-    if (!sl || !tp || !profile) return
-    setLoading(true)
+  const runAnalysis = async () => {
+    if (!entryNum || !profile) return
+    setAnalyzing(true)
+    setAnalyzeError(null)
+    setStep('analysis')
+
+    try {
+      // Load user's custom criteria weights
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Niet ingelogd')
+
+      const criteria = await ensureCriteriaExist(user.id)
+      const criteriaPayload = criteria.map(c => ({
+        key: c.key,
+        weight: c.weight,
+        enabled: c.enabled,
+      }))
+
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pair,
+          direction,
+          entryPrice: entryNum,
+          fomoThreshold: profile.fomo_threshold_pips,
+          criteria: criteriaPayload,
+          threshold: 60,
+        }),
+      })
+
+      const data: AnalysisResult = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnalysis(data)
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Analyse mislukt')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleSubmit = async (overrideAdvice = false) => {
+    if (!sl || !tp || !profile || !analysis) return
+    setSubmitting(true)
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -122,13 +110,19 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
       stop_loss: sl,
       take_profit: tp,
       lot_size: parseFloat(lotSize),
-      checklist_completed: allChecked,
-      checklist_items: checklist,
+      checklist_completed: analysis.recommendation === 'WEL_DOEN',
+      checklist_items: {},
+      indicator_snapshot: {
+        ...analysis.snapshot,
+        override: overrideAdvice,
+        override_reason: overrideReason,
+      },
+      analysis_score: analysis.score,
       status: 'OPEN',
     })
 
     await refreshTrades()
-    setLoading(false)
+    setSubmitting(false)
     onClose()
   }
 
@@ -137,155 +131,76 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+      <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+
         {/* Header */}
-        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
           <div>
-            <h2 className="text-lg font-bold text-white">
-              {step === 'checklist' ? '✅ Pre-Trade Checklist' : '📊 Trade Invoeren'}
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {step === 'checklist' ? 'Alle vakjes moeten aangevinkt zijn' : 'Vul de trade details in'}
-            </p>
+            <h2 className="text-lg font-bold text-white">Nieuwe Trade</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <StepDot active={step === 'entry'} done={step !== 'entry'} label="1. Invoer" />
+              <div className="w-8 h-px bg-slate-700" />
+              <StepDot active={step === 'analysis'} done={step === 'confirm'} label="2. Analyse" />
+              <div className="w-8 h-px bg-slate-700" />
+              <StepDot active={step === 'confirm'} done={false} label="3. Bevestig" />
+            </div>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Step indicator */}
-        <div className="px-6 pt-4 flex items-center gap-2">
-          <div className={cn('flex items-center gap-2 text-sm font-medium', step === 'checklist' ? 'text-emerald-400' : 'text-slate-500')}>
-            <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-xs', step === 'checklist' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400')}>1</div>
-            Checklist
-          </div>
-          <ChevronRight className="w-4 h-4 text-slate-600" />
-          <div className={cn('flex items-center gap-2 text-sm font-medium', step === 'entry' ? 'text-emerald-400' : 'text-slate-500')}>
-            <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-xs', step === 'entry' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400')}>2</div>
-            Trade Entry
-          </div>
-        </div>
+        <div className="px-6 py-5">
 
-        <div className="px-6 py-4">
-          {step === 'checklist' ? (
-            <>
-              <div className="space-y-3">
-                {CHECKLIST_ITEMS.map((item) => (
-                  <div
-                    key={item.key}
-                    className={cn(
-                      'border rounded-xl p-4 transition-all cursor-pointer',
-                      checklist[item.key]
-                        ? 'border-emerald-500/50 bg-emerald-500/5'
-                        : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
-                    )}
-                    onClick={() => setChecklist(prev => ({ ...prev, [item.key]: !prev[item.key] }))}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={cn(
-                        'w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5 border-2 transition-all',
-                        checklist[item.key]
-                          ? 'bg-emerald-500 border-emerald-500'
-                          : 'border-slate-600 bg-transparent'
-                      )}>
-                        {checklist[item.key] && (
-                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={cn('text-sm font-semibold', checklist[item.key] ? 'text-emerald-400' : 'text-white')}>
-                            {item.label}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setTooltip(tooltip === item.key ? null : item.key)
-                            }}
-                            className="text-slate-500 hover:text-slate-300"
-                          >
-                            <Info className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-1">{item.description}</p>
-                        {tooltip === item.key && (
-                          <div className="mt-2 p-3 bg-slate-700 rounded-lg text-xs text-slate-300 border border-slate-600">
-                            {item.tooltip}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {!allChecked && (
-                <div className="mt-4 flex items-center gap-2 text-amber-400 text-sm">
-                  <AlertTriangle className="w-4 h-4" />
-                  Vink alle {Object.values(checklist).filter(Boolean).length}/{CHECKLIST_ITEMS.length} items aan om door te gaan
-                </div>
-              )}
-
-              <button
-                onClick={() => setStep('entry')}
-                disabled={!allChecked}
-                className="mt-4 w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
-              >
-                Doorgaan naar Trade Entry →
-              </button>
-            </>
-          ) : (
-            <>
-              {/* Direction toggle */}
-              <div className="mb-4">
+          {/* STEP 1: ENTRY */}
+          {step === 'entry' && (
+            <div className="space-y-4">
+              {/* Direction */}
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Richting</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setDirection('LONG')}
                     className={cn(
-                      'py-3 rounded-xl font-bold text-base transition-all border-2',
+                      'py-3 rounded-xl font-bold text-base transition-all border-2 flex items-center justify-center gap-2',
                       direction === 'LONG'
                         ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                     )}
                   >
-                    📈 LONG / BUY
+                    <TrendingUp className="w-5 h-5" /> LONG / BUY
                   </button>
                   <button
                     onClick={() => setDirection('SHORT')}
                     className={cn(
-                      'py-3 rounded-xl font-bold text-base transition-all border-2',
+                      'py-3 rounded-xl font-bold text-base transition-all border-2 flex items-center justify-center gap-2',
                       direction === 'SHORT'
                         ? 'bg-red-500/20 border-red-500 text-red-400'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                     )}
                   >
-                    📉 SHORT / SELL
+                    <TrendingDown className="w-5 h-5" /> SHORT / SELL
                   </button>
                 </div>
               </div>
 
               {/* Pair */}
-              <div className="mb-4">
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Currency Pair</label>
                 <select
                   value={pair}
                   onChange={e => setPair(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500"
                 >
-                  {PAIRS.map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
+                  {PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
 
               {/* Entry price */}
-              <div className="mb-4">
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Entry Prijs
-                  <span className="text-slate-500 font-normal ml-2">(voer handmatig in van cTrader)</span>
+                  <span className="text-slate-500 font-normal ml-2 text-xs">(van cTrader)</span>
                 </label>
                 <input
                   type="number"
@@ -297,25 +212,25 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
                 />
               </div>
 
-              {/* Auto-calculated values */}
+              {/* Auto-calculated SL/TP */}
               {entryNum > 0 && (
-                <div className="mb-4 grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                     <div className="text-xs text-slate-400 mb-1">Stop Loss (6 pips)</div>
-                    <div className="text-red-400 font-bold">{sl?.toFixed(5)}</div>
+                    <div className="text-red-400 font-bold font-mono">{sl?.toFixed(5)}</div>
                   </div>
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
                     <div className="text-xs text-slate-400 mb-1">Take Profit (12 pips)</div>
-                    <div className="text-emerald-400 font-bold">{tp?.toFixed(5)}</div>
+                    <div className="text-emerald-400 font-bold font-mono">{tp?.toFixed(5)}</div>
                   </div>
                 </div>
               )}
 
               {/* Lot size */}
-              <div className="mb-4">
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Lot Size
-                  <span className="text-slate-500 font-normal ml-2">(automatisch berekend, aanpasbaar)</span>
+                  <span className="text-slate-500 font-normal ml-2 text-xs">(automatisch berekend)</span>
                 </label>
                 <input
                   type="number"
@@ -325,37 +240,231 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
                   placeholder="bijv. 0.50"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                 />
-                {profile && (
+                {profile && entryPrice && (
                   <p className="text-xs text-slate-500 mt-1">
-                    Risico: {profile.risk_percentage}% van €{profile.account_balance.toLocaleString()} = €{((profile.account_balance * profile.risk_percentage) / 100).toFixed(2)}
+                    Risico: {profile.risk_percentage}% = €{((profile.account_balance * profile.risk_percentage) / 100).toFixed(2)}
                   </p>
                 )}
               </div>
 
-              {/* R:R info */}
-              <div className="mb-4 bg-slate-800/50 border border-slate-700 rounded-lg p-3 text-sm text-slate-400">
-                <span className="text-white font-medium">Risico/Rendement: 1:2</span>
-                {' · '}SL = 6 pips · TP = 12 pips
-              </div>
+              <button
+                onClick={runAnalysis}
+                disabled={!entryPrice || !lotSize}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                Analyseer deze trade →
+              </button>
+            </div>
+          )}
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setStep('checklist')}
-                  className="px-4 py-3 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-700 transition-colors"
-                >
-                  ← Terug
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={!entryPrice || !lotSize || loading}
-                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
-                >
-                  {loading ? 'Opslaan...' : '✅ Trade Openen'}
-                </button>
-              </div>
-            </>
+          {/* STEP 2: ANALYSIS */}
+          {step === 'analysis' && (
+            <div>
+              {analyzing && (
+                <div className="text-center py-12">
+                  <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mx-auto mb-4" />
+                  <p className="text-white font-medium">Live data ophalen...</p>
+                  <p className="text-slate-400 text-sm mt-1">EMA's, Donchian Channel, FOMO check</p>
+                </div>
+              )}
+
+              {analyzeError && (
+                <div className="text-center py-8">
+                  <XCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+                  <p className="text-red-400 font-medium">{analyzeError}</p>
+                  <button
+                    onClick={runAnalysis}
+                    className="mt-4 flex items-center gap-2 mx-auto px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 text-sm"
+                  >
+                    <RefreshCw className="w-4 h-4" /> Opnieuw proberen
+                  </button>
+                  <button onClick={() => setStep('entry')} className="mt-2 text-slate-500 text-sm hover:text-slate-300 block mx-auto">
+                    ← Terug
+                  </button>
+                </div>
+              )}
+
+              {!analyzing && !analyzeError && analysis && (
+                <div className="space-y-4">
+                  {/* Score + Recommendation */}
+                  <AnalysisHeader analysis={analysis} direction={direction} pair={pair} />
+
+                  {/* Criteria breakdown */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Analyse per criterium</p>
+                    {analysis.criteria.map(c => (
+                      <CriterionRow key={c.key} criterion={c} />
+                    ))}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-2 space-y-3">
+                    {analysis.recommendation === 'WEL_DOEN' && (
+                      <button
+                        onClick={() => handleSubmit(false)}
+                        disabled={submitting}
+                        className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle className="w-5 h-5" />
+                        {submitting ? 'Opslaan...' : 'Trade openen ✅'}
+                      </button>
+                    )}
+
+                    {analysis.recommendation === 'NIET_DOEN' && (
+                      <button
+                        onClick={onClose}
+                        className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl transition-colors"
+                      >
+                        Trade overslaan — goede beslissing 👍
+                      </button>
+                    )}
+
+                    {analysis.recommendation === 'TWIJFEL' && (
+                      <button
+                        onClick={() => handleSubmit(false)}
+                        disabled={submitting}
+                        className="w-full bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-colors"
+                      >
+                        {submitting ? 'Opslaan...' : 'Toch openen (twijfelgeval)'}
+                      </button>
+                    )}
+
+                    {/* Override: always possible but requires reason */}
+                    {analysis.recommendation !== 'WEL_DOEN' && (
+                      <details className="group">
+                        <summary className="text-xs text-slate-500 hover:text-slate-400 cursor-pointer select-none">
+                          Toch handelen tegen het advies in?
+                        </summary>
+                        <div className="mt-2 space-y-2">
+                          <textarea
+                            value={overrideReason}
+                            onChange={e => setOverrideReason(e.target.value)}
+                            placeholder="Waarom wil je toch handelen? (wordt opgeslagen voor analyse)"
+                            rows={2}
+                            className="w-full bg-slate-800 border border-orange-500/40 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 text-sm resize-none"
+                          />
+                          <button
+                            onClick={() => handleSubmit(true)}
+                            disabled={submitting || !overrideReason.trim()}
+                            className="w-full bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30 disabled:opacity-40 font-medium py-2 rounded-lg text-sm transition-colors"
+                          >
+                            Overschrijven en trade openen
+                          </button>
+                        </div>
+                      </details>
+                    )}
+
+                    <button
+                      onClick={() => { setStep('entry'); setAnalysis(null) }}
+                      className="text-slate-500 text-sm hover:text-slate-300 block mx-auto"
+                    >
+                      ← Gegevens aanpassen
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function StepDot({ active, done, label }: { active: boolean; done: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <div className={cn(
+        'w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold',
+        done ? 'bg-emerald-500 text-white' : active ? 'bg-emerald-500/30 border border-emerald-500 text-emerald-400' : 'bg-slate-700 text-slate-500'
+      )}>
+        {done ? '✓' : ''}
+      </div>
+      <span className={cn('text-xs', active ? 'text-white' : 'text-slate-500')}>{label}</span>
+    </div>
+  )
+}
+
+function AnalysisHeader({ analysis, direction, pair }: { analysis: AnalysisResult; direction: string; pair: string }) {
+  const rec = analysis.recommendation
+  const config = {
+    WEL_DOEN: {
+      bg: 'bg-emerald-500/10 border-emerald-500/30',
+      icon: <CheckCircle className="w-8 h-8 text-emerald-400" />,
+      text: 'text-emerald-400',
+      label: '✅ WEL DOEN',
+      sub: 'De analyse ondersteunt deze trade',
+    },
+    NIET_DOEN: {
+      bg: 'bg-red-500/10 border-red-500/30',
+      icon: <XCircle className="w-8 h-8 text-red-400" />,
+      text: 'text-red-400',
+      label: '❌ NIET DOEN',
+      sub: 'Te weinig criteria zijn groen',
+    },
+    TWIJFEL: {
+      bg: 'bg-orange-500/10 border-orange-500/30',
+      icon: <AlertCircle className="w-8 h-8 text-orange-400" />,
+      text: 'text-orange-400',
+      label: '⚠️ TWIJFELGEVAL',
+      sub: 'Net niet genoeg bevestiging',
+    },
+  }[rec]
+
+  const passCount = analysis.criteria.filter(c => c.pass).length
+  const total = analysis.criteria.length
+
+  return (
+    <div className={cn('border rounded-2xl p-4', config.bg)}>
+      <div className="flex items-center gap-3 mb-3">
+        {config.icon}
+        <div>
+          <div className={cn('text-xl font-bold', config.text)}>{config.label}</div>
+          <div className="text-sm text-slate-400">{pair} {direction} · {config.sub}</div>
+        </div>
+      </div>
+
+      {/* Score bar */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs text-slate-400">
+          <span>Score: {analysis.score}/100 ({passCount}/{total} criteria groen)</span>
+          <span>Drempel: 60</span>
+        </div>
+        <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all',
+              rec === 'WEL_DOEN' ? 'bg-emerald-500' : rec === 'TWIJFEL' ? 'bg-orange-500' : 'bg-red-500'
+            )}
+            style={{ width: `${analysis.score}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CriterionRow({ criterion }: { criterion: CriterionResult }) {
+  return (
+    <div className={cn(
+      'border rounded-xl p-3 flex items-start gap-3 transition-all',
+      criterion.pass ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'
+    )}>
+      <div className="shrink-0 mt-0.5">
+        {criterion.pass
+          ? <CheckCircle className="w-4 h-4 text-emerald-400" />
+          : <XCircle className="w-4 h-4 text-red-400" />
+        }
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className={cn('text-sm font-semibold', criterion.pass ? 'text-emerald-400' : 'text-red-400')}>
+            {criterion.label}
+          </span>
+          <span className="text-xs text-slate-500 shrink-0">gewicht: {criterion.weight.toFixed(0)}%</span>
+        </div>
+        <p className="text-xs text-slate-400 mt-0.5">{criterion.reason}</p>
+        <p className="text-xs text-slate-600 mt-0.5 font-mono">{criterion.value}</p>
       </div>
     </div>
   )
