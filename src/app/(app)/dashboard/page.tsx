@@ -36,25 +36,28 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-white">Dashboard</h1>
           <p className="text-slate-400 text-sm mt-1">
-            {currentTime.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
-            {' · '}
+            <span className="hidden sm:inline">
+              {currentTime.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {' · '}
+            </span>
             {currentTime.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
         </div>
 
         {/* Trading window status */}
         <div className={cn(
-          'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
+          'flex items-center gap-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium shrink-0',
           isInWindow
             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
             : 'bg-slate-800 text-slate-400 border border-slate-700'
         )}>
-          <div className={cn('w-2 h-2 rounded-full', isInWindow ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
-          {isInWindow ? 'Trading Window Open' : `Window gesloten`}
+          <div className={cn('w-2 h-2 rounded-full shrink-0', isInWindow ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
+          <span className="hidden sm:inline">{isInWindow ? 'Trading Window Open' : 'Window gesloten'}</span>
+          <span className="sm:hidden">{isInWindow ? 'Open' : 'Gesloten'}</span>
         </div>
       </div>
 

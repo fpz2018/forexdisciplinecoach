@@ -39,3 +39,13 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* Safe area padding for bottom tab bar (Android home indicator) */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent double-tap zoom on touch targets */
+button, a {
+  touch-action: manipulation;
+}

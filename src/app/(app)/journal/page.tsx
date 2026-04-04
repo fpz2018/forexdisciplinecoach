@@ -99,8 +99,13 @@ export default function JournalPage() {
     else { setSortField(field); setSortDir('desc') }
   }
 
+  const openNote = (trade: Trade) => {
+    setSelectedTrade(trade)
+    setNoteText(trade.notes ?? '')
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Trade Journal</h1>
@@ -108,46 +113,122 @@ export default function JournalPage() {
         </div>
         <button
           onClick={exportCSV}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg text-sm transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg text-sm transition-colors min-h-[44px]"
         >
           <Download className="w-4 h-4" />
-          Export CSV
+          <span className="hidden sm:inline">Export CSV</span>
+          <span className="sm:hidden">CSV</span>
         </button>
       </div>
 
       {/* Filters */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-40">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-32">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Zoek op pair..."
+            placeholder="Zoek pair..."
             className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
         </div>
 
         <FilterSelect value={filterStatus} onChange={v => setFilterStatus(v as typeof filterStatus)} options={[
-          { value: 'ALL', label: 'Alle statussen' },
+          { value: 'ALL', label: 'Alle' },
           { value: 'OPEN', label: 'Open' },
           { value: 'CLOSED', label: 'Gesloten' },
         ]} />
 
         <FilterSelect value={filterResult} onChange={v => setFilterResult(v as typeof filterResult)} options={[
-          { value: 'ALL', label: 'Win & Verlies' },
-          { value: 'WIN', label: 'Alleen winst' },
-          { value: 'LOSS', label: 'Alleen verlies' },
+          { value: 'ALL', label: 'W+V' },
+          { value: 'WIN', label: 'Winst' },
+          { value: 'LOSS', label: 'Verlies' },
         ]} />
 
         <FilterSelect value={filterDirection} onChange={v => setFilterDirection(v as typeof filterDirection)} options={[
-          { value: 'ALL', label: 'LONG & SHORT' },
-          { value: 'LONG', label: 'Alleen LONG' },
-          { value: 'SHORT', label: 'Alleen SHORT' },
+          { value: 'ALL', label: 'L+S' },
+          { value: 'LONG', label: 'LONG' },
+          { value: 'SHORT', label: 'SHORT' },
         ]} />
       </div>
 
-      {/* Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      {/* Mobile Card List */}
+      <div className="sm:hidden space-y-2">
+        {filtered.length === 0 ? (
+          <div className="text-center py-12 text-slate-500 bg-slate-900 border border-slate-800 rounded-xl">
+            Geen trades gevonden
+          </div>
+        ) : (
+          filtered.map(trade => (
+            <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    'flex items-center gap-1 text-sm font-bold',
+                    trade.direction === 'LONG' ? 'text-emerald-400' : 'text-red-400'
+                  )}>
+                    {trade.direction === 'LONG'
+                      ? <TrendingUp className="w-4 h-4" />
+                      : <TrendingDown className="w-4 h-4" />
+                    }
+                    {trade.direction}
+                  </span>
+                  <span className="font-semibold text-white">{trade.pair}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {trade.result_pips != null ? (
+                    <span className={cn(
+                      'text-sm font-bold',
+                      trade.result_pips > 0 ? 'text-emerald-400' : 'text-red-400'
+                    )}>
+                      {trade.result_pips > 0 ? '+' : ''}{trade.result_pips} pips
+                    </span>
+                  ) : (
+                    <span className={cn(
+                      'text-xs px-2 py-1 rounded-full font-medium',
+                      trade.status === 'OPEN' ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-700 text-slate-400'
+                    )}>
+                      {trade.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>{formatDate(trade.created_at)}</span>
+                <div className="flex items-center gap-3">
+                  {trade.checklist_completed
+                    ? <CheckSquare className="w-4 h-4 text-emerald-400" />
+                    : <Square className="w-4 h-4 text-slate-600" />
+                  }
+                  <button
+                    onClick={() => openNote(trade)}
+                    className="flex items-center gap-1 text-slate-400 active:text-white py-1"
+                  >
+                    <FileText className="w-4 h-4" />
+                    {trade.notes ? 'Notitie' : 'Voeg toe'}
+                  </button>
+                </div>
+              </div>
+
+              {trade.result_pips != null && trade.status === 'CLOSED' && (
+                <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-500">
+                  <span>Entry: <span className="font-mono text-slate-400">{trade.entry_price.toFixed(5)}</span></span>
+                  <span>Sluit: <span className="font-mono text-slate-400">{trade.close_price?.toFixed(5) ?? '-'}</span></span>
+                  {trade.result_money != null && (
+                    <span className={trade.result_money >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      {trade.result_money >= 0 ? '+' : ''}€{trade.result_money.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Table */}
+      <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -227,10 +308,7 @@ export default function JournalPage() {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => {
-                          setSelectedTrade(trade)
-                          setNoteText(trade.notes ?? '')
-                        }}
+                        onClick={() => openNote(trade)}
                         className="flex items-center gap-1 text-slate-500 hover:text-slate-300 text-xs transition-colors"
                       >
                         <FileText className="w-3 h-3" />
@@ -245,11 +323,14 @@ export default function JournalPage() {
         </div>
       </div>
 
-      {/* Note Modal */}
+      {/* Note Modal — bottom sheet on mobile */}
       {selectedTrade && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedTrade(null)} />
-          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6">
+          <div className="relative bg-slate-900 border-t border-slate-800 sm:border sm:rounded-2xl rounded-t-2xl w-full sm:max-w-md shadow-2xl p-6 pb-8 sm:pb-6">
+            <div className="sm:hidden flex justify-center mb-4">
+              <div className="w-10 h-1 bg-slate-600 rounded-full" />
+            </div>
             <h3 className="text-lg font-bold text-white mb-1">Notitie</h3>
             <p className="text-slate-400 text-sm mb-4">
               {selectedTrade.pair} · {selectedTrade.direction} · {formatDate(selectedTrade.created_at)}
@@ -262,13 +343,16 @@ export default function JournalPage() {
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
             />
             <div className="flex gap-3 mt-4">
-              <button onClick={() => setSelectedTrade(null)} className="px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors text-sm">
+              <button
+                onClick={() => setSelectedTrade(null)}
+                className="px-4 py-3 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-700 transition-colors text-sm min-h-[48px]"
+              >
                 Annuleren
               </button>
               <button
                 onClick={handleSaveNote}
                 disabled={savingNote}
-                className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-white font-semibold py-2 rounded-lg transition-colors text-sm"
+                className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-colors text-sm min-h-[48px]"
               >
                 {savingNote ? 'Opslaan...' : 'Opslaan'}
               </button>
@@ -291,7 +375,7 @@ function FilterSelect({
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500"
+      className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 min-h-[44px]"
     >
       {options.map(o => (
         <option key={o.value} value={o.value}>{o.label}</option>

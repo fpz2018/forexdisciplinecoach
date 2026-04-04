@@ -76,57 +76,60 @@ function TradeRow({ trade, onClose }: { trade: Trade; onClose: () => void }) {
   const isLong = trade.direction === 'LONG'
 
   return (
-    <div className="px-6 py-4 flex items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
-        <div className={cn(
-          'w-9 h-9 rounded-lg flex items-center justify-center',
-          isLong ? 'bg-emerald-500/20' : 'bg-red-500/20'
-        )}>
-          {isLong
-            ? <TrendingUp className="w-5 h-5 text-emerald-400" />
-            : <TrendingDown className="w-5 h-5 text-red-400" />
-          }
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-white text-sm">{trade.pair}</span>
-            <span className={cn(
-              'text-xs px-1.5 py-0.5 rounded font-bold',
-              isLong ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-            )}>
-              {trade.direction}
-            </span>
+    <div className="px-4 sm:px-6 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={cn(
+            'w-9 h-9 shrink-0 rounded-lg flex items-center justify-center',
+            isLong ? 'bg-emerald-500/20' : 'bg-red-500/20'
+          )}>
+            {isLong
+              ? <TrendingUp className="w-5 h-5 text-emerald-400" />
+              : <TrendingDown className="w-5 h-5 text-red-400" />
+            }
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{formatDate(trade.created_at)}</div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-white text-sm">{trade.pair}</span>
+              <span className={cn(
+                'text-xs px-1.5 py-0.5 rounded font-bold shrink-0',
+                isLong ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+              )}>
+                {trade.direction}
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">{formatDate(trade.created_at)}</div>
+          </div>
         </div>
+
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 active:bg-red-500/30 rounded-lg text-sm font-medium transition-colors min-h-[44px] shrink-0"
+        >
+          <X className="w-4 h-4" />
+          Sluiten
+        </button>
       </div>
 
-      <div className="hidden sm:flex items-center gap-6 text-sm">
-        <div>
-          <div className="text-xs text-slate-500">Entry</div>
-          <div className="text-white font-mono">{trade.entry_price.toFixed(5)}</div>
+      {/* Price details — inline on mobile, only visible on larger screens originally, now always shown compact */}
+      <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+        <div className="bg-slate-800/60 rounded-lg px-2 py-1.5">
+          <div className="text-slate-500 mb-0.5">Entry</div>
+          <div className="text-white font-mono text-xs">{trade.entry_price.toFixed(5)}</div>
         </div>
-        <div>
-          <div className="text-xs text-slate-500">SL</div>
-          <div className="text-red-400 font-mono">{trade.stop_loss.toFixed(5)}</div>
+        <div className="bg-slate-800/60 rounded-lg px-2 py-1.5">
+          <div className="text-slate-500 mb-0.5">SL</div>
+          <div className="text-red-400 font-mono text-xs">{trade.stop_loss.toFixed(5)}</div>
         </div>
-        <div>
-          <div className="text-xs text-slate-500">TP</div>
-          <div className="text-emerald-400 font-mono">{trade.take_profit.toFixed(5)}</div>
+        <div className="bg-slate-800/60 rounded-lg px-2 py-1.5">
+          <div className="text-slate-500 mb-0.5">TP</div>
+          <div className="text-emerald-400 font-mono text-xs">{trade.take_profit.toFixed(5)}</div>
         </div>
-        <div>
-          <div className="text-xs text-slate-500">Lots</div>
-          <div className="text-white font-mono">{trade.lot_size}</div>
+        <div className="bg-slate-800/60 rounded-lg px-2 py-1.5">
+          <div className="text-slate-500 mb-0.5">Lots</div>
+          <div className="text-white font-mono text-xs">{trade.lot_size}</div>
         </div>
       </div>
-
-      <button
-        onClick={onClose}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 rounded-lg text-sm font-medium transition-colors"
-      >
-        <X className="w-4 h-4" />
-        Sluiten
-      </button>
     </div>
   )
 }
@@ -158,9 +161,12 @@ function CloseTradeModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6">
+      <div className="relative bg-slate-900 border-t border-slate-800 sm:border sm:rounded-2xl rounded-t-2xl w-full sm:max-w-md shadow-2xl p-6 pb-8 sm:pb-6">
+        <div className="sm:hidden flex justify-center mb-4">
+          <div className="w-10 h-1 bg-slate-600 rounded-full" />
+        </div>
         <h3 className="text-lg font-bold text-white mb-1">Trade Sluiten</h3>
         <p className="text-slate-400 text-sm mb-4">{trade.pair} · {trade.direction} · Entry {trade.entry_price.toFixed(5)}</p>
 
@@ -219,13 +225,13 @@ function CloseTradeModal({
         )}
 
         <div className="flex gap-3">
-          <button onClick={onClose} className="px-4 py-3 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-700 transition-colors">
+          <button onClick={onClose} className="px-4 py-3 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-700 transition-colors min-h-[52px]">
             Annuleren
           </button>
           <button
             onClick={handleClose}
             disabled={!closePrice || loading}
-            className="flex-1 bg-red-500 hover:bg-red-400 disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-colors"
+            className="flex-1 bg-red-500 hover:bg-red-400 active:bg-red-600 disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-colors min-h-[52px]"
           >
             {loading ? 'Sluiten...' : 'Positie Sluiten'}
           </button>

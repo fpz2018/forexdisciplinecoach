@@ -129,23 +129,30 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+
+      {/* Bottom sheet on mobile, centered dialog on desktop */}
+      <div className="relative bg-slate-900 border-t border-slate-800 sm:border sm:rounded-2xl w-full sm:max-w-lg max-h-[95dvh] sm:max-h-[92vh] overflow-y-auto shadow-2xl rounded-t-2xl sm:rounded-2xl">
+
+        {/* Drag handle — mobile only */}
+        <div className="sm:hidden flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 bg-slate-600 rounded-full" />
+        </div>
 
         {/* Header */}
-        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between z-10">
           <div>
-            <h2 className="text-lg font-bold text-white">Nieuwe Trade</h2>
+            <h2 className="text-base sm:text-lg font-bold text-white">Nieuwe Trade</h2>
             <div className="flex items-center gap-2 mt-1">
               <StepDot active={step === 'entry'} done={step !== 'entry'} label="1. Invoer" />
-              <div className="w-8 h-px bg-slate-700" />
+              <div className="w-6 sm:w-8 h-px bg-slate-700" />
               <StepDot active={step === 'analysis'} done={step === 'confirm'} label="2. Analyse" />
-              <div className="w-8 h-px bg-slate-700" />
+              <div className="w-6 sm:w-8 h-px bg-slate-700" />
               <StepDot active={step === 'confirm'} done={false} label="3. Bevestig" />
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <X className="w-5 h-5" />
           </button>
         </div>
