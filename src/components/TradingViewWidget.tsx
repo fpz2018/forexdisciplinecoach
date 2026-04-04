@@ -38,6 +38,11 @@ export default function TradingViewWidget({
       save_image: false,
       calendar: false,
       allow_symbol_change: true,
+      studies: [
+        { id: 'MAExp@tv-basicstudies', inputs: { length: 11 } },
+        { id: 'MAExp@tv-basicstudies', inputs: { length: 25 } },
+        { id: 'DonchianChannels@tv-basicstudies', inputs: { length: 9 } },
+      ],
     })
 
     containerRef.current.appendChild(script)
