@@ -62,6 +62,26 @@ export function getPipValue(pair: string): number {
   return pipValues[pair] ?? 10
 }
 
+export function isTradingDay(tradingDays: number[], blockedDates: string[]): boolean {
+  const now = new Date()
+  // JS: 0=Sun,1=Mon,...,6=Sat → we use same convention
+  if (!tradingDays.includes(now.getDay())) return false
+  const todayStr = now.toISOString().split('T')[0]
+  if (blockedDates.includes(todayStr)) return false
+  return true
+}
+
+export function getTradingDayBlockReason(tradingDays: number[], blockedDates: string[]): string | null {
+  const now = new Date()
+  const todayStr = now.toISOString().split('T')[0]
+  if (blockedDates.includes(todayStr)) return 'Feestdag / geblokkeerde dag'
+  if (!tradingDays.includes(now.getDay())) {
+    const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag']
+    return `Geen trading op ${dayNames[now.getDay()]}`
+  }
+  return null
+}
+
 export function isInTradingWindow(windows: Array<{ start_time: string; end_time: string; active: boolean }>): boolean {
   const now = new Date()
   const currentTime = now.getHours() * 60 + now.getMinutes()

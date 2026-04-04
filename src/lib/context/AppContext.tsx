@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile, Trade, TradingWindow } from '@/lib/supabase/types'
-import { isInTradingWindow } from '@/lib/utils'
+import { isInTradingWindow, isTradingDay, getTradingDayBlockReason } from '@/lib/utils'
 
 interface AppContextType {
   profile: Profile | null
@@ -104,13 +104,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const todayTrades = trades.filter(t => new Date(t.created_at).toDateString() === today)
   const openTrades = trades.filter(t => t.status === 'OPEN')
 
+  const tradingDays = profile?.trading_days ?? [1, 2, 3, 4, 5]
+  const blockedDates = profile?.blocked_dates ?? []
   const isInWindow = isInTradingWindow(tradingWindows)
+  const isTradingDayOk = isTradingDay(tradingDays, blockedDates)
   const todayLosses = todayTrades.filter(t => t.status === 'CLOSED' && (t.result_pips ?? 0) < 0).length
   const maxLosses = profile?.max_daily_losses ?? 2
   const maxTrades = profile?.max_trades_per_day ?? 5
 
   let tradeBlockReason: string | null = null
-  if (!isInWindow) {
+  if (!isTradingDayOk) {
+    tradeBlockReason = getTradingDayBlockReason(tradingDays, blockedDates) ?? 'Geen trading vandaag'
+  } else if (!isInWindow) {
     tradeBlockReason = 'Buiten trading window'
   } else if (todayLosses >= maxLosses) {
     tradeBlockReason = `Daily loss limit bereikt (${todayLosses}/${maxLosses} verliezen)`

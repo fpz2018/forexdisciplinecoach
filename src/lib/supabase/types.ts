@@ -19,6 +19,8 @@ export type Database = {
           max_daily_losses: number
           fomo_threshold_pips: number
           default_pair: string
+          trading_days: number[]
+          blocked_dates: string[]
           created_at: string
         }
         Insert: {
@@ -30,6 +32,8 @@ export type Database = {
           max_daily_losses?: number
           fomo_threshold_pips?: number
           default_pair?: string
+          trading_days?: number[]
+          blocked_dates?: string[]
           created_at?: string
         }
         Update: {
@@ -41,6 +45,8 @@ export type Database = {
           max_daily_losses?: number
           fomo_threshold_pips?: number
           default_pair?: string
+          trading_days?: number[]
+          blocked_dates?: string[]
           created_at?: string
         }
         Relationships: []

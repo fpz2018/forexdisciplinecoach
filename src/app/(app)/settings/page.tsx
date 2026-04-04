@@ -3,14 +3,25 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '@/lib/context/AppContext'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Trash2, Save, Clock, Bell } from 'lucide-react'
+import { Plus, Trash2, Save, Clock, Bell, Calendar, Ban } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TradingWindow } from '@/lib/supabase/types'
 
 const PAIRS = ['GBPUSD', 'EURUSD', 'GBPJPY', 'EURJPY', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'EURGBP']
 
+// JS day numbers: 0=Sun, 1=Mon, ..., 6=Sat
+const DAYS = [
+  { label: 'Ma', value: 1 },
+  { label: 'Di', value: 2 },
+  { label: 'Wo', value: 3 },
+  { label: 'Do', value: 4 },
+  { label: 'Vr', value: 5 },
+  { label: 'Za', value: 6 },
+  { label: 'Zo', value: 0 },
+]
+
 export default function SettingsPage() {
-  const { profile, tradingWindows, refreshProfile, refreshTrades } = useApp()
+  const { profile, tradingWindows, refreshProfile } = useApp()
   const supabase = createClient()
 
   // Profile state
@@ -20,6 +31,8 @@ export default function SettingsPage() {
   const [maxLosses, setMaxLosses] = useState('')
   const [fomoThreshold, setFomoThreshold] = useState('')
   const [defaultPair, setDefaultPair] = useState('GBPUSD')
+  const [tradingDays, setTradingDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [blockedDates, setBlockedDates] = useState<string[]>([])
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
 
@@ -37,12 +50,20 @@ export default function SettingsPage() {
       setMaxLosses(profile.max_daily_losses.toString())
       setFomoThreshold(profile.fomo_threshold_pips.toString())
       setDefaultPair(profile.default_pair)
+      setTradingDays(profile.trading_days ?? [1, 2, 3, 4, 5])
+      setBlockedDates(profile.blocked_dates ?? [])
     }
   }, [profile])
 
   useEffect(() => {
     setWindows(tradingWindows)
   }, [tradingWindows])
+
+  const toggleDay = (day: number) => {
+    setTradingDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    )
+  }
 
   const saveProfile = async () => {
     if (!profile) return
@@ -55,6 +76,8 @@ export default function SettingsPage() {
       max_daily_losses: parseInt(maxLosses),
       fomo_threshold_pips: parseFloat(fomoThreshold),
       default_pair: defaultPair,
+      trading_days: tradingDays,
+      blocked_dates: blockedDates,
     }).eq('id', profile.id)
 
     await refreshProfile()
@@ -63,18 +86,34 @@ export default function SettingsPage() {
     setTimeout(() => setProfileSaved(false), 2000)
   }
 
+  const blockToday = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    if (blockedDates.includes(today)) return
+    const updated = [...blockedDates, today]
+    setBlockedDates(updated)
+    if (!profile) return
+    await supabase.from('profiles').update({ blocked_dates: updated }).eq('id', profile.id)
+    await refreshProfile()
+  }
+
+  const unblockDate = async (date: string) => {
+    const updated = blockedDates.filter(d => d !== date)
+    setBlockedDates(updated)
+    if (!profile) return
+    await supabase.from('profiles').update({ blocked_dates: updated }).eq('id', profile.id)
+    await refreshProfile()
+  }
+
   const addWindow = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setSavingWindow(true)
-
     await supabase.from('trading_windows').insert({
       user_id: user.id,
       start_time: newStart,
       end_time: newEnd,
       active: true,
     })
-
     await refreshProfile()
     setSavingWindow(false)
   }
@@ -96,11 +135,12 @@ export default function SettingsPage() {
     }
     const permission = await Notification.requestPermission()
     if (permission === 'granted') {
-      new Notification('Forex Discipline Coach', {
-        body: 'Notificaties zijn ingeschakeld!',
-      })
+      new Notification('Forex Discipline Coach', { body: 'Notificaties zijn ingeschakeld!' })
     }
   }
+
+  const today = new Date().toISOString().split('T')[0]
+  const todayBlocked = blockedDates.includes(today)
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -112,53 +152,11 @@ export default function SettingsPage() {
       {/* Account Settings */}
       <Section title="Account Instellingen" icon={<Save className="w-4 h-4" />}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field
-            label="Account Balance (€)"
-            type="number"
-            value={balance}
-            onChange={setBalance}
-            step="100"
-            placeholder="10000"
-          />
-          <Field
-            label="Risico % per Trade"
-            type="number"
-            value={riskPct}
-            onChange={setRiskPct}
-            step="0.1"
-            min="0.1"
-            max="5"
-            placeholder="1"
-          />
-          <Field
-            label="Max Trades per Dag"
-            type="number"
-            value={maxTrades}
-            onChange={setMaxTrades}
-            step="1"
-            min="1"
-            max="20"
-            placeholder="5"
-          />
-          <Field
-            label="Max Daily Losses"
-            type="number"
-            value={maxLosses}
-            onChange={setMaxLosses}
-            step="1"
-            min="1"
-            max="10"
-            placeholder="2"
-          />
-          <Field
-            label="FOMO Drempel (pips in 5 min)"
-            type="number"
-            value={fomoThreshold}
-            onChange={setFomoThreshold}
-            step="1"
-            min="5"
-            placeholder="10"
-          />
+          <Field label="Account Balance (€)" type="number" value={balance} onChange={setBalance} step="100" placeholder="10000" />
+          <Field label="Risico % per Trade" type="number" value={riskPct} onChange={setRiskPct} step="0.1" min="0.1" max="5" placeholder="1" />
+          <Field label="Max Trades per Dag" type="number" value={maxTrades} onChange={setMaxTrades} step="1" min="1" max="20" placeholder="5" />
+          <Field label="Max Daily Losses" type="number" value={maxLosses} onChange={setMaxLosses} step="1" min="1" max="10" placeholder="2" />
+          <Field label="FOMO Drempel (pips in 5 min)" type="number" value={fomoThreshold} onChange={setFomoThreshold} step="1" min="5" placeholder="10" />
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">Standaard Currency Pair</label>
             <select
@@ -171,7 +169,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Risk calculation preview */}
         {balance && riskPct && (
           <div className="mt-4 bg-slate-800 rounded-lg p-3 text-sm">
             <span className="text-slate-400">Risico per trade: </span>
@@ -197,6 +194,105 @@ export default function SettingsPage() {
         </button>
       </Section>
 
+      {/* Trading Days */}
+      <Section title="Trading Dagen" icon={<Calendar className="w-4 h-4" />}>
+        <p className="text-slate-400 text-sm mb-4">
+          Selecteer op welke dagen je mag traden. Weekend is standaard uitgeschakeld.
+        </p>
+
+        <div className="flex gap-2 flex-wrap mb-6">
+          {DAYS.map(({ label, value }) => {
+            const active = tradingDays.includes(value)
+            const isWeekend = value === 0 || value === 6
+            return (
+              <button
+                key={value}
+                onClick={() => toggleDay(value)}
+                className={cn(
+                  'w-12 h-12 rounded-xl font-semibold text-sm transition-all border-2',
+                  active
+                    ? isWeekend
+                      ? 'bg-orange-500/20 border-orange-500 text-orange-400'
+                      : 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                    : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+
+        {(tradingDays.includes(0) || tradingDays.includes(6)) && (
+          <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-orange-400 text-sm mb-4">
+            <span className="shrink-0">⚠️</span>
+            Weekend trading ingeschakeld — forex markten zijn dan gesloten.
+          </div>
+        )}
+
+        <button
+          onClick={saveProfile}
+          disabled={savingProfile}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg text-sm transition-colors"
+        >
+          <Save className="w-4 h-4" />
+          Dagen opslaan
+        </button>
+      </Section>
+
+      {/* Feestdagen / geblokkeerde dagen */}
+      <Section title="Feestdagen & Gesloten Dagen" icon={<Ban className="w-4 h-4" />}>
+        <p className="text-slate-400 text-sm mb-4">
+          Blokkeer specifieke dagen waarop de markt gesloten is (feestdagen, bankholidays).
+          Trading is dan de hele dag uitgeschakeld.
+        </p>
+
+        {/* Block today button */}
+        <button
+          onClick={blockToday}
+          disabled={todayBlocked}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all mb-4',
+            todayBlocked
+              ? 'bg-red-500/10 border border-red-500/30 text-red-400 cursor-default'
+              : 'bg-slate-800 border border-slate-700 text-slate-300 hover:text-red-400 hover:border-red-500/50'
+          )}
+        >
+          <Ban className="w-4 h-4" />
+          {todayBlocked ? '✓ Vandaag geblokkeerd' : 'Blokkeer vandaag (feestdag)'}
+        </button>
+
+        {/* List of blocked dates */}
+        {blockedDates.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-2">Geblokkeerde datums</p>
+            {blockedDates
+              .slice()
+              .sort()
+              .map(date => (
+                <div key={date} className="flex items-center justify-between bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5">
+                  <span className="text-sm text-white font-medium">
+                    {new Date(date + 'T12:00:00').toLocaleDateString('nl-NL', {
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </span>
+                  <button
+                    onClick={() => unblockDate(date)}
+                    className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+          </div>
+        ) : (
+          <p className="text-slate-600 text-sm">Geen datums geblokkeerd.</p>
+        )}
+      </Section>
+
       {/* Trading Windows */}
       <Section title="Trading Windows" icon={<Clock className="w-4 h-4" />}>
         <p className="text-slate-400 text-sm mb-4">
@@ -214,15 +310,9 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => toggleWindow(w.id, !w.active)}
-                    className={cn(
-                      'w-10 h-6 rounded-full transition-all relative',
-                      w.active ? 'bg-emerald-500' : 'bg-slate-600'
-                    )}
+                    className={cn('w-10 h-6 rounded-full transition-all relative', w.active ? 'bg-emerald-500' : 'bg-slate-600')}
                   >
-                    <div className={cn(
-                      'absolute top-1 w-4 h-4 bg-white rounded-full transition-all',
-                      w.active ? 'left-5' : 'left-1'
-                    )} />
+                    <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full transition-all', w.active ? 'left-5' : 'left-1')} />
                   </button>
                   <div>
                     <span className="font-medium text-white">{w.start_time} – {w.end_time}</span>
@@ -242,7 +332,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Add window */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <p className="text-sm font-medium text-slate-300 mb-3">Nieuw window toevoegen</p>
           <div className="flex items-center gap-3">
