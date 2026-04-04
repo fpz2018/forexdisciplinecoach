@@ -160,6 +160,9 @@ export type Database = {
           weight: number
           enabled: boolean
           auto_learn: boolean
+          auto_generated: boolean
+          pattern_keys: string[] | null
+          exception_keys: string[] | null
           win_count: number
           loss_count: number
           created_at: string
@@ -173,6 +176,9 @@ export type Database = {
           weight?: number
           enabled?: boolean
           auto_learn?: boolean
+          auto_generated?: boolean
+          pattern_keys?: string[] | null
+          exception_keys?: string[] | null
           win_count?: number
           loss_count?: number
           created_at?: string
@@ -186,6 +192,9 @@ export type Database = {
           weight?: number
           enabled?: boolean
           auto_learn?: boolean
+          auto_generated?: boolean
+          pattern_keys?: string[] | null
+          exception_keys?: string[] | null
           win_count?: number
           loss_count?: number
           created_at?: string

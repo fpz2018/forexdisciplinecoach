@@ -336,16 +336,39 @@ export default function SettingsPage() {
 
       {/* Analyse Criteria */}
       <Section title="Analyse Criteria & Gewichten" icon={<Brain className="w-4 h-4" />}>
-        <p className="text-slate-400 text-sm mb-4">
-          Het systeem leert automatisch van jouw trades (auto-leren aan). Je kunt gewichten ook zelf aanpassen.
-          De totaalScore moet ≥ 60 zijn voor een &quot;WEL DOEN&quot; advies.
+        <p className="text-slate-400 text-sm mb-2">
+          Het systeem leert automatisch van jouw trades. 1H en 4H wegen het zwaarst.
+          Score ≥ 60 = <span className="text-emerald-400 font-medium">WEL DOEN</span>.
         </p>
+
+        {/* Discovered patterns — shown separately */}
+        {criteria.filter(c => c.auto_generated).length > 0 && (
+          <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+            <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+              <Brain className="w-3 h-3" /> Geleerde patronen ({criteria.filter(c => c.auto_generated).length})
+            </p>
+            {criteria.filter(c => c.auto_generated).map(c => {
+              const wr = c.win_count + c.loss_count > 0 ? Math.round(c.win_count / (c.win_count + c.loss_count) * 100) : 0
+              return (
+                <div key={c.id} className="mb-2 last:mb-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-sm font-medium text-purple-300">{c.label}</span>
+                      <p className="text-xs text-slate-400 mt-0.5">{c.description}</p>
+                    </div>
+                    <span className="text-xs text-emerald-400 font-bold shrink-0">{wr}% wins</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {criteria.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Laden...</div>
         ) : (
           <div className="space-y-3">
-            {criteria.map(c => {
+            {criteria.filter(c => !c.auto_generated).map(c => {
               const winRate = c.win_count + c.loss_count > 0
                 ? Math.round((c.win_count / (c.win_count + c.loss_count)) * 100)
                 : null
@@ -356,7 +379,7 @@ export default function SettingsPage() {
                 )}>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-white text-sm">{c.label}</span>
                         {winRate !== null && (
                           <span className={cn(
@@ -364,7 +387,7 @@ export default function SettingsPage() {
                             winRate >= 55 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                           )}>
                             {winRate >= 55 ? <TrendingUp className="w-3 h-3 inline mr-0.5" /> : <TrendingDown className="w-3 h-3 inline mr-0.5" />}
-                            {winRate}% trefkans ({c.win_count}W/{c.loss_count}V)
+                            {winRate}% ({c.win_count}W/{c.loss_count}V)
                           </span>
                         )}
                       </div>
