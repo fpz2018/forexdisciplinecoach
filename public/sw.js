@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fx-coach-v1';
+const CACHE_NAME = 'fx-coach-v2';
 const STATIC_ASSETS = ['/dashboard', '/journal', '/stats', '/settings'];
 
 self.addEventListener('install', (event) => {
