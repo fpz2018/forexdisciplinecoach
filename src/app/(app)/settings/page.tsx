@@ -264,10 +264,16 @@ export default function SettingsPage() {
           })}
         </div>
 
-        {(tradingDays.includes(0) || tradingDays.includes(6)) && (
+        {tradingDays.includes(6) && (
           <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-orange-400 text-sm mb-4">
             <span className="shrink-0">⚠️</span>
-            Weekend trading ingeschakeld — forex markten zijn dan gesloten.
+            Zaterdag trading ingeschakeld — forex markten zijn dan gesloten.
+          </div>
+        )}
+        {tradingDays.includes(0) && !tradingDays.includes(6) && (
+          <div className="flex items-start gap-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-blue-400 text-sm mb-4">
+            <span className="shrink-0">💡</span>
+            Zondag ingeschakeld — forex markt opent zondagavond 23:00 CET. Stel een trading window in vanaf 23:00.
           </div>
         )}
 

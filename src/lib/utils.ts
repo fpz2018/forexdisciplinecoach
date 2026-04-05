@@ -92,6 +92,10 @@ export function isInTradingWindow(windows: Array<{ start_time: string; end_time:
     const [endH, endM] = window.end_time.split(':').map(Number)
     const startMinutes = startH * 60 + startM
     const endMinutes = endH * 60 + endM
+    // Support cross-midnight windows (e.g. 23:00-02:00)
+    if (startMinutes > endMinutes) {
+      return currentTime >= startMinutes || currentTime < endMinutes
+    }
     return currentTime >= startMinutes && currentTime < endMinutes
   })
 }
@@ -102,6 +106,16 @@ export function getNextTradingWindow(windows: Array<{ start_time: string; end_ti
 
   const activeWindows = windows.filter(w => w.active)
   if (activeWindows.length === 0) return 'Geen trading windows ingesteld'
+
+  // Check if we're currently inside a cross-midnight window
+  const inCrossMidnight = activeWindows.some(w => {
+    const [startH, startM] = w.start_time.split(':').map(Number)
+    const [endH, endM] = w.end_time.split(':').map(Number)
+    const startMin = startH * 60 + startM
+    const endMin = endH * 60 + endM
+    return startMin > endMin && (currentTime >= startMin || currentTime < endMin)
+  })
+  if (inCrossMidnight) return 'Nu actief'
 
   const futureWindows = activeWindows
     .map(w => {
