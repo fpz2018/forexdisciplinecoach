@@ -9,7 +9,7 @@ import { X, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
 import type { Trade } from '@/lib/supabase/types'
 
 export default function OpenPositions() {
-  const { openTrades, refreshTrades } = useApp()
+  const { openTrades, profile, refreshTrades, refreshProfile } = useApp()
   const [closingTrade, setClosingTrade] = useState<Trade | null>(null)
   const supabase = createClient()
 
@@ -56,6 +56,14 @@ export default function OpenPositions() {
               updated_at: new Date().toISOString(),
             }).eq('id', closingTrade.id)
 
+            // Update account balance
+            if (profile) {
+              const newBalance = parseFloat((profile.account_balance + resultMoney).toFixed(2))
+              await supabase.from('profiles').update({
+                account_balance: newBalance,
+              }).eq('id', profile.id)
+            }
+
             // Self-learning: adjust criteria weights based on outcome
             const { data: { user } } = await supabase.auth.getUser()
             if (user && closingTrade.indicator_snapshot) {
@@ -64,6 +72,7 @@ export default function OpenPositions() {
             }
 
             await refreshTrades()
+            await refreshProfile()
             setClosingTrade(null)
           }}
         />
