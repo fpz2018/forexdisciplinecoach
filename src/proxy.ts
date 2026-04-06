@@ -27,6 +27,13 @@ export async function proxy(request: NextRequest) {
 
   const isAuthRoute = request.nextUrl.pathname.startsWith('/auth')
   const isPublicRoute = request.nextUrl.pathname === '/'
+  const isPublicFile = request.nextUrl.pathname.startsWith('/manifest') ||
+    request.nextUrl.pathname === '/sw.js' ||
+    request.nextUrl.pathname.startsWith('/icons/')
+
+  if (isPublicFile) {
+    return supabaseResponse
+  }
 
   if (!user && !isAuthRoute && !isPublicRoute) {
     const url = request.nextUrl.clone()
@@ -45,6 +52,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest|sw\\.js|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|json)$).*)',
   ],
 }
