@@ -54,14 +54,29 @@ Elke TF krijgt onafhankelijk een van deze statussen:
 | `job_done`          | Magneet (EMA11/EMA25/psycho-number) is geraakt. Wachten op reactie.        |
 | `breaking_through`  | Prijs is door zowel EMA11 als EMA25 heen. Nieuw doel = tegenoverliggende BB.|
 
+### Touch vs. doorbraak — definitie
+
+Dit onderscheid is fundamenteel:
+
+- **Aangeraakt (touch)** = de **wick** (high/low) van een closed candle raakt of
+  passeert de magneet, maar de **close** van die candle eindigt nog aan de
+  oorspronkelijke kant (de kant waar de prijs vandaan kwam). De magneet heeft
+  zijn werk gedaan; de prijs heeft afgeketst.
+- **Doorgebroken (broken)** = de **close** van een closed candle eindigt voorbij
+  de magneet (in de mean-reversion richting). Eén candle is genoeg, geen
+  bevestigingscandle nodig.
+
 ### Statusovergangen
 
 - `neutral` → `outside_bb`: nieuwe closed candle sluit buiten BB.
 - `outside_bb` → `traveling_to_target`: volgende candle bevestigt richting naar magneet.
-- `traveling_to_target` → `job_done`: prijs raakt EMA11, EMA25, of psycho-number.
+- `traveling_to_target` → `job_done`: een candle **raakt** een magneet maar
+  **sluit terug aan de oorspronkelijke kant** (touch, geen doorbraak).
 - `job_done` → `neutral`: prijs reageert op de magneet en keert (terug richting BB).
-- `job_done` → `breaking_through`: prijs gaat door beide EMA's heen.
-- `breaking_through` → doel = tegenoverliggende BB-band.
+- `traveling_to_target` of `job_done` → `breaking_through`: een candle **sluit
+  voorbij** een magneet. Het volgende doel wordt de eerstvolgende magneet
+  daarachter (of de tegenoverliggende BB-band als er geen magneet meer over is).
+- `breaking_through` blijft `breaking_through` zolang de close aan de doorbraak-kant blijft.
 
 > "Job done" betekent: de oorspronkelijke trigger mag niet opnieuw afgevuurd
 > worden voor dezelfde beweging. Nieuwe context (reactie op de lijn) telt

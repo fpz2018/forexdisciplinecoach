@@ -200,35 +200,60 @@ function determineTfState(
 
   const primary = candidates[0] ?? null
 
-  // Has the price touched ANY magnet between trigger and now?
-  let touched = false
+  // Walk candles since trigger. For each magnet determine:
+  //   - touched: wick crossed but candle closed back on the original side
+  //   - brokenThrough: at least one candle CLOSED past the magnet (mean-rev side)
+  // Track the FURTHEST magnet that has been closed past — that becomes the
+  // anchor for breaking_through and the new target is the next magnet beyond.
+  const isPastMagnet = (close: number, level: number) =>
+    direction === 'SHORT' ? close < level : close > level
+
+  let touchedAny = false
+  let furthestBrokenLevel: number | null = null
+
   for (let i = triggerIdx; i >= 0; i--) {
     const c = closedCandles[i]
     for (const m of candidates) {
-      if (c.low <= m.level && c.high >= m.level) {
-        touched = true
-        break
+      const wickCrossed = c.low <= m.level && c.high >= m.level
+      const closedPast = isPastMagnet(c.close, m.level)
+      if (closedPast) {
+        if (furthestBrokenLevel === null) {
+          furthestBrokenLevel = m.level
+        } else {
+          furthestBrokenLevel =
+            direction === 'SHORT'
+              ? Math.min(furthestBrokenLevel, m.level)
+              : Math.max(furthestBrokenLevel, m.level)
+        }
+      } else if (wickCrossed) {
+        touchedAny = true
       }
     }
-    if (touched) break
   }
 
-  // Has price broken through BOTH EMAs past the mean-rev side?
-  const lowerEma = Math.min(ema11, ema25)
-  const upperEma = Math.max(ema11, ema25)
-  let brokeThrough = false
-  if (direction === 'SHORT' && currentPrice < lowerEma) brokeThrough = true
-  if (direction === 'LONG' && currentPrice > upperEma) brokeThrough = true
-
   let status: TfStatus
+  let activePrimary: MagnetTarget | null = primary
   let secondary: MagnetTarget | null = null
-  if (brokeThrough) {
+
+  if (furthestBrokenLevel !== null) {
     status = 'breaking_through'
-    secondary =
-      direction === 'SHORT'
-        ? { type: 'bb_band', level: bb.lower, label: `BB lower ${labelPrice(bb.lower)}` }
-        : { type: 'bb_band', level: bb.upper, label: `BB upper ${labelPrice(bb.upper)}` }
-  } else if (touched) {
+    // Find the next magnet BEYOND the furthest broken level (in mean-rev direction)
+    const beyond = candidates.filter((m) =>
+      direction === 'SHORT' ? m.level < furthestBrokenLevel! : m.level > furthestBrokenLevel!
+    )
+    if (beyond.length > 0) {
+      activePrimary = beyond[0]
+      secondary =
+        direction === 'SHORT'
+          ? { type: 'bb_band', level: bb.lower, label: `BB lower ${labelPrice(bb.lower)}` }
+          : { type: 'bb_band', level: bb.upper, label: `BB upper ${labelPrice(bb.upper)}` }
+    } else {
+      activePrimary =
+        direction === 'SHORT'
+          ? { type: 'bb_band', level: bb.lower, label: `BB lower ${labelPrice(bb.lower)}` }
+          : { type: 'bb_band', level: bb.upper, label: `BB upper ${labelPrice(bb.upper)}` }
+    }
+  } else if (touchedAny) {
     status = 'job_done'
   } else if (triggerIdx === 0) {
     status = 'outside_bb'
@@ -236,13 +261,15 @@ function determineTfState(
     status = 'traveling_to_target'
   }
 
-  const distancePips = primary ? Math.abs(currentPrice - primary.level) * pipMul : null
+  const distancePips = activePrimary
+    ? Math.abs(currentPrice - activePrimary.level) * pipMul
+    : null
 
   void decimals
   return {
     status,
     setupDirection: direction,
-    primaryTarget: primary,
+    primaryTarget: activePrimary,
     secondaryTarget: secondary,
     distanceToTargetPips: distancePips,
     bbUpper: bb.upper,
