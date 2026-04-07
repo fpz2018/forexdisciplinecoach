@@ -79,6 +79,177 @@ function calcDonchian(candles: Candle[], period: number) {
   return { upper, lower, middle: (upper + lower) / 2 }
 }
 
+function calcBollinger(candles: Candle[], period = 20, mult = 2) {
+  const recent = candles.slice(0, period)
+  if (recent.length < period) return null
+  const closes = recent.map((c) => c.close)
+  const mean = closes.reduce((a, b) => a + b, 0) / period
+  const variance = closes.reduce((s, c) => s + (c - mean) ** 2, 0) / period
+  const sd = Math.sqrt(variance)
+  return { upper: mean + mult * sd, lower: mean - mult * sd, middle: mean }
+}
+
+/**
+ * Generate psycho-numbers (00/25/50/75 on the last two decimals) between two
+ * price levels. Step = 0.0025 for 4-decimal pairs, 0.25 for JPY pairs.
+ */
+function psychoNumbersBetween(low: number, high: number, pipMul: number): number[] {
+  const isJpy = pipMul === 100
+  const step = isJpy ? 0.25 : 0.0025
+  const decimals = isJpy ? 2 : 4
+  const out: number[] = []
+  const start = Math.ceil(low / step) * step
+  for (let p = start; p <= high + step / 2; p += step) {
+    out.push(parseFloat(p.toFixed(decimals + 1)))
+  }
+  return out
+}
+
+type TfStatus = 'neutral' | 'outside_bb' | 'traveling_to_target' | 'job_done' | 'breaking_through'
+
+export interface MagnetTarget {
+  type: 'ema11' | 'ema25' | 'psycho' | 'bb_band'
+  level: number
+  label: string
+}
+
+interface TfStateOutput {
+  status: TfStatus
+  setupDirection: 'LONG' | 'SHORT' | null
+  primaryTarget: MagnetTarget | null
+  secondaryTarget: MagnetTarget | null
+  distanceToTargetPips: number | null
+  bbUpper: number | null
+  bbLower: number | null
+}
+
+function determineTfState(
+  closedCandles: Candle[],
+  ema11: number,
+  ema25: number,
+  pipMul: number
+): TfStateOutput {
+  const bb = calcBollinger(closedCandles, 20, 2)
+  if (!bb || closedCandles.length === 0) {
+    return {
+      status: 'neutral',
+      setupDirection: null,
+      primaryTarget: null,
+      secondaryTarget: null,
+      distanceToTargetPips: null,
+      bbUpper: null,
+      bbLower: null,
+    }
+  }
+
+  const currentPrice = closedCandles[0].close
+  const decimals = pipMul === 100 ? 3 : 5
+
+  // Find trigger: most recent close outside BB in last 5 closed candles
+  let triggerIdx = -1
+  let direction: 'LONG' | 'SHORT' | null = null
+  for (let i = 0; i < Math.min(5, closedCandles.length); i++) {
+    const close = closedCandles[i].close
+    if (close > bb.upper) {
+      triggerIdx = i
+      direction = 'SHORT'
+      break
+    }
+    if (close < bb.lower) {
+      triggerIdx = i
+      direction = 'LONG'
+      break
+    }
+  }
+
+  if (triggerIdx === -1 || direction === null) {
+    return {
+      status: 'neutral',
+      setupDirection: null,
+      primaryTarget: null,
+      secondaryTarget: null,
+      distanceToTargetPips: null,
+      bbUpper: bb.upper,
+      bbLower: bb.lower,
+    }
+  }
+
+  const triggerClose = closedCandles[triggerIdx].close
+
+  // Build candidate magnets in mean-reversion direction
+  const candidates: MagnetTarget[] = []
+  const labelPrice = (p: number) => p.toFixed(pipMul === 100 ? 2 : 4)
+
+  if (direction === 'SHORT') {
+    if (ema11 < triggerClose) candidates.push({ type: 'ema11', level: ema11, label: 'EMA11' })
+    if (ema25 < triggerClose) candidates.push({ type: 'ema25', level: ema25, label: 'EMA25' })
+    const lowerBound = Math.min(ema11, ema25, currentPrice) - (pipMul === 100 ? 0.5 : 0.005)
+    for (const p of psychoNumbersBetween(lowerBound, triggerClose, pipMul)) {
+      if (p < triggerClose) candidates.push({ type: 'psycho', level: p, label: labelPrice(p) })
+    }
+    candidates.sort((a, b) => b.level - a.level) // highest first (nearest to trigger)
+  } else {
+    if (ema11 > triggerClose) candidates.push({ type: 'ema11', level: ema11, label: 'EMA11' })
+    if (ema25 > triggerClose) candidates.push({ type: 'ema25', level: ema25, label: 'EMA25' })
+    const upperBound = Math.max(ema11, ema25, currentPrice) + (pipMul === 100 ? 0.5 : 0.005)
+    for (const p of psychoNumbersBetween(triggerClose, upperBound, pipMul)) {
+      if (p > triggerClose) candidates.push({ type: 'psycho', level: p, label: labelPrice(p) })
+    }
+    candidates.sort((a, b) => a.level - b.level) // lowest first (nearest to trigger)
+  }
+
+  const primary = candidates[0] ?? null
+
+  // Has the price touched ANY magnet between trigger and now?
+  let touched = false
+  for (let i = triggerIdx; i >= 0; i--) {
+    const c = closedCandles[i]
+    for (const m of candidates) {
+      if (c.low <= m.level && c.high >= m.level) {
+        touched = true
+        break
+      }
+    }
+    if (touched) break
+  }
+
+  // Has price broken through BOTH EMAs past the mean-rev side?
+  const lowerEma = Math.min(ema11, ema25)
+  const upperEma = Math.max(ema11, ema25)
+  let brokeThrough = false
+  if (direction === 'SHORT' && currentPrice < lowerEma) brokeThrough = true
+  if (direction === 'LONG' && currentPrice > upperEma) brokeThrough = true
+
+  let status: TfStatus
+  let secondary: MagnetTarget | null = null
+  if (brokeThrough) {
+    status = 'breaking_through'
+    secondary =
+      direction === 'SHORT'
+        ? { type: 'bb_band', level: bb.lower, label: `BB lower ${labelPrice(bb.lower)}` }
+        : { type: 'bb_band', level: bb.upper, label: `BB upper ${labelPrice(bb.upper)}` }
+  } else if (touched) {
+    status = 'job_done'
+  } else if (triggerIdx === 0) {
+    status = 'outside_bb'
+  } else {
+    status = 'traveling_to_target'
+  }
+
+  const distancePips = primary ? Math.abs(currentPrice - primary.level) * pipMul : null
+
+  void decimals
+  return {
+    status,
+    setupDirection: direction,
+    primaryTarget: primary,
+    secondaryTarget: secondary,
+    distanceToTargetPips: distancePips,
+    bbUpper: bb.upper,
+    bbLower: bb.lower,
+  }
+}
+
 /**
  * Compute when the next candle of `interval` will close, given the most recent
  * CLOSED candle's datetime (UTC). Twelve Data datetimes are UTC strings like
@@ -116,6 +287,13 @@ export interface TimeframeSummary {
   lastClosedAt: string
   nextCloseAtMs: number
   secondsUntilClose: number
+  status: TfStatus
+  setupDirection: 'LONG' | 'SHORT' | null
+  primaryTarget: MagnetTarget | null
+  secondaryTarget: MagnetTarget | null
+  distanceToTargetPips: number | null
+  bbUpper: number | null
+  bbLower: number | null
 }
 
 export interface CriterionResult {
@@ -195,6 +373,7 @@ export async function POST(request: NextRequest) {
       const ema25 = calcEMA(closed, 25)
       const lastClosedAt = closed[0]?.datetime ?? ''
       const nextAt = nextCloseMs(interval, lastClosedAt)
+      const state = determineTfState(closed, ema11, ema25, pipMul)
       return {
         interval,
         label: INTERVALS[interval].label,
@@ -204,6 +383,7 @@ export async function POST(request: NextRequest) {
         lastClosedAt,
         nextCloseAtMs: nextAt,
         secondsUntilClose: Math.max(0, Math.floor((nextAt - now) / 1000)),
+        ...state,
       }
     }
 

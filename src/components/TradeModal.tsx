@@ -476,31 +476,61 @@ function TimeframesPanel({ timeframes }: { timeframes: TimeframeSummary[] }) {
     return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
   }
 
+  const statusMeta: Record<string, { label: string; color: string; bg: string }> = {
+    neutral:             { label: 'neutraal',     color: 'text-slate-500', bg: 'bg-slate-700/40' },
+    outside_bb:          { label: 'BUITEN BB',    color: 'text-amber-300', bg: 'bg-amber-500/15' },
+    traveling_to_target: { label: 'onderweg',     color: 'text-sky-300',   bg: 'bg-sky-500/15'   },
+    job_done:            { label: 'JOB DONE',     color: 'text-emerald-300', bg: 'bg-emerald-500/15' },
+    breaking_through:    { label: 'BREEKT DOOR',  color: 'text-fuchsia-300', bg: 'bg-fuchsia-500/15' },
+  }
+
   return (
     <div className="border border-slate-800 bg-slate-800/40 rounded-xl p-3">
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">
         Hogere timeframes <span className="text-slate-600 normal-case">(gesloten candles)</span>
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2">
         {timeframes.map((tf) => {
           const msUntil = tf.nextCloseAtMs - now
           const arrow = tf.trend === 'UP' ? '▲' : tf.trend === 'DOWN' ? '▼' : '─'
-          const color =
+          const trendColor =
             tf.trend === 'UP'
               ? 'text-emerald-400'
               : tf.trend === 'DOWN'
                 ? 'text-red-400'
                 : 'text-slate-500'
+          const meta = statusMeta[tf.status] ?? statusMeta.neutral
           return (
             <div
               key={tf.interval}
-              className="flex items-center justify-between bg-slate-900/60 rounded-lg px-2.5 py-2"
+              className="bg-slate-900/60 rounded-lg px-2.5 py-2"
             >
-              <div className="flex items-center gap-2">
-                <span className={cn('text-base font-bold', color)}>{arrow}</span>
-                <span className="text-xs font-semibold text-slate-300">{tf.label}</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={cn('text-base font-bold', trendColor)}>{arrow}</span>
+                  <span className="text-xs font-semibold text-slate-300">{tf.label}</span>
+                  <span className={cn('text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded', meta.color, meta.bg)}>
+                    {meta.label}
+                  </span>
+                  {tf.setupDirection && tf.status !== 'neutral' && (
+                    <span className="text-[10px] text-slate-500">
+                      {tf.setupDirection === 'LONG' ? '↑ long setup' : '↓ short setup'}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">{formatCountdown(msUntil)}</span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">{formatCountdown(msUntil)}</span>
+              {tf.primaryTarget && (
+                <div className="mt-1 text-[10px] text-slate-400 flex items-center gap-2">
+                  <span>→ doel: <span className="text-slate-200 font-mono">{tf.primaryTarget.label}</span></span>
+                  {tf.distanceToTargetPips !== null && (
+                    <span className="text-slate-500">({tf.distanceToTargetPips.toFixed(1)} pips)</span>
+                  )}
+                  {tf.secondaryTarget && (
+                    <span className="text-slate-500">→ {tf.secondaryTarget.label}</span>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
