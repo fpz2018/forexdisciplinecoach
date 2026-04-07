@@ -19,11 +19,29 @@ interface Candle {
   close: number
 }
 
-async function fetchCandles(symbol: string, interval: string, count: number): Promise<Candle[]> {
-  const url = `${BASE_URL}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${count}&apikey=${API_KEY}&format=JSON`
-  const res = await fetch(url, { next: { revalidate: 60 } })
+// ── Higher-TF configuration ────────────────────────────────────────────────
+// Twelve Data interval names + cache lifetime + how many candles to request
+type IntervalKey = '5min' | '30min' | '1h' | '4h' | '8h' | '1day' | '1week' | '1month'
+
+const INTERVALS: Record<IntervalKey, { revalidate: number; outputsize: number; label: string }> = {
+  '5min':   { revalidate: 60,    outputsize: 50, label: '5m'      },
+  '30min':  { revalidate: 300,   outputsize: 30, label: '30m'     },
+  '1h':     { revalidate: 600,   outputsize: 30, label: '1H'      },
+  '4h':     { revalidate: 1800,  outputsize: 30, label: '4H'      },
+  '8h':     { revalidate: 3600,  outputsize: 30, label: '8H'      },
+  '1day':   { revalidate: 3600,  outputsize: 30, label: 'Daily'   },
+  '1week':  { revalidate: 14400, outputsize: 30, label: 'Weekly'  },
+  '1month': { revalidate: 14400, outputsize: 30, label: 'Monthly' },
+}
+
+async function fetchCandles(symbol: string, interval: IntervalKey): Promise<Candle[]> {
+  const cfg = INTERVALS[interval]
+  const url = `${BASE_URL}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${cfg.outputsize}&apikey=${API_KEY}&format=JSON`
+  const res = await fetch(url, { next: { revalidate: cfg.revalidate } })
   const data = await res.json()
-  if (data.status === 'error' || !data.values) throw new Error(data.message ?? `Geen data voor ${symbol} ${interval}`)
+  if (data.status === 'error' || !data.values) {
+    throw new Error(data.message ?? `Geen data voor ${symbol} ${interval}`)
+  }
   return data.values.map((v: Record<string, string>) => ({
     datetime: v.datetime,
     open: parseFloat(v.open),
@@ -33,8 +51,19 @@ async function fetchCandles(symbol: string, interval: string, count: number): Pr
   }))
 }
 
+/**
+ * Twelve Data returns candles newest-first. The first candle (index 0) is the
+ * still-forming "current" candle if you query during market hours. For trend
+ * analysis we only want CLOSED candles, so we drop the first one.
+ */
+function closedOnly(candles: Candle[]): Candle[] {
+  return candles.slice(1)
+}
+
 function calcEMA(candles: Candle[], period: number): number {
-  const closes = [...candles].reverse().map(c => c.close)
+  // Twelve Data is newest-first; reverse so oldest comes first for EMA seeding.
+  const closes = [...candles].reverse().map((c) => c.close)
+  if (closes.length === 0) return 0
   const multiplier = 2 / (period + 1)
   let ema = closes[0]
   for (let i = 1; i < closes.length; i++) {
@@ -45,9 +74,48 @@ function calcEMA(candles: Candle[], period: number): number {
 
 function calcDonchian(candles: Candle[], period: number) {
   const recent = candles.slice(0, period)
-  const upper = Math.max(...recent.map(c => c.high))
-  const lower = Math.min(...recent.map(c => c.low))
+  const upper = Math.max(...recent.map((c) => c.high))
+  const lower = Math.min(...recent.map((c) => c.low))
   return { upper, lower, middle: (upper + lower) / 2 }
+}
+
+/**
+ * Compute when the next candle of `interval` will close, given the most recent
+ * CLOSED candle's datetime (UTC). Twelve Data datetimes are UTC strings like
+ * "2026-04-07 09:00:00". The next close is `lastClosed + interval duration`.
+ */
+const INTERVAL_MS: Record<IntervalKey, number> = {
+  '5min':   5 * 60 * 1000,
+  '30min':  30 * 60 * 1000,
+  '1h':     60 * 60 * 1000,
+  '4h':     4 * 60 * 60 * 1000,
+  '8h':     8 * 60 * 60 * 1000,
+  '1day':   24 * 60 * 60 * 1000,
+  '1week':  7 * 24 * 60 * 60 * 1000,
+  '1month': 30 * 24 * 60 * 60 * 1000, // approximation, only used for display
+}
+
+function nextCloseMs(interval: IntervalKey, lastClosedDatetime: string): number {
+  // Twelve Data datetimes are UTC. Append "Z" so JS parses as UTC.
+  const lastClosedTs = new Date(lastClosedDatetime.replace(' ', 'T') + 'Z').getTime()
+  if (Number.isNaN(lastClosedTs)) return 0
+  // The next candle CLOSES one full interval after the previous one closed.
+  // i.e. lastClosed already represents the START of the candle that just
+  // finished, so the next close is lastClosed + 2 * interval.
+  // But Twelve Data's datetime field is the candle OPEN time, so close = open + interval.
+  // For the *next* close, we need open + 2*interval.
+  return lastClosedTs + 2 * INTERVAL_MS[interval]
+}
+
+export interface TimeframeSummary {
+  interval: IntervalKey
+  label: string
+  trend: 'UP' | 'DOWN' | 'FLAT'
+  ema11: number
+  ema25: number
+  lastClosedAt: string
+  nextCloseAtMs: number
+  secondsUntilClose: number
 }
 
 export interface CriterionResult {
@@ -65,7 +133,14 @@ export interface AnalysisResult {
   recommendation: 'WEL_DOEN' | 'NIET_DOEN' | 'TWIJFEL'
   criteria: CriterionResult[]
   snapshot: Record<string, number | boolean>
+  timeframes: TimeframeSummary[]
   error?: string
+}
+
+function trendOf(ema11: number, ema25: number, pipMul: number): 'UP' | 'DOWN' | 'FLAT' {
+  const diffPips = (ema11 - ema25) * pipMul
+  if (Math.abs(diffPips) < 0.5) return 'FLAT'
+  return diffPips > 0 ? 'UP' : 'DOWN'
 }
 
 export async function POST(request: NextRequest) {
@@ -74,43 +149,85 @@ export async function POST(request: NextRequest) {
     const {
       pair,
       direction,
-      entryPrice,
+      entryPrice: _entryPrice,
       fomoThreshold = 10,
       criteria: userCriteria = [],
       threshold = 60,
     } = body
 
+    void _entryPrice
+
     const symbol = toApiSymbol(pair)
     const pipMul = pipMultiplier(pair)
 
-    // Fetch 5min, 1H, 4H candles in parallel
-    const [candles5m, candles1h, candles4h] = await Promise.all([
-      fetchCandles(symbol, '5min', 50),
-      fetchCandles(symbol, '1h', 30),
-      fetchCandles(symbol, '4h', 25),
+    // ── Fetch all timeframes in parallel (each with its own cache lifetime) ─
+    const [c5m, c30m, c1h, c4h, c8h, c1d, c1w, c1mo] = await Promise.all([
+      fetchCandles(symbol, '5min'),
+      fetchCandles(symbol, '30min'),
+      fetchCandles(symbol, '1h'),
+      fetchCandles(symbol, '4h'),
+      fetchCandles(symbol, '8h'),
+      fetchCandles(symbol, '1day'),
+      fetchCandles(symbol, '1week'),
+      fetchCandles(symbol, '1month'),
     ])
 
-    // Indicators
-    const ema11_5m  = calcEMA(candles5m, 11)
-    const ema25_5m  = calcEMA(candles5m, 25)
-    const ema11_1h  = calcEMA(candles1h, 11)
-    const ema25_1h  = calcEMA(candles1h, 25)
-    const ema11_4h  = calcEMA(candles4h, 11)
-    const ema25_4h  = calcEMA(candles4h, 25)
-    const donchian  = calcDonchian(candles5m, 9)
-
-    const lastCandle   = candles5m[0]
-    const prevCandle   = candles5m[1]
+    // ── 5-minute uses ALL candles (entry timeframe — current price matters) ─
+    const ema11_5m = calcEMA(c5m, 11)
+    const ema25_5m = calcEMA(c5m, 25)
+    const donchian = calcDonchian(c5m, 9)
+    const lastCandle = c5m[0]
+    const prevCandle = c5m[1]
     const recentMovePips = Math.abs(lastCandle.close - prevCandle.close) * pipMul
-    const emaDiffPips    = Math.abs(ema11_5m - ema25_5m) * pipMul
+    const emaDiffPips = Math.abs(ema11_5m - ema25_5m) * pipMul
     const channelWidthPips = (donchian.upper - donchian.lower) * pipMul
-    const positionInChannel = channelWidthPips > 0
-      ? ((lastCandle.close - donchian.lower) / (donchian.upper - donchian.lower)) * 100
-      : 50
+    const positionInChannel =
+      channelWidthPips > 0
+        ? ((lastCandle.close - donchian.lower) / (donchian.upper - donchian.lower)) * 100
+        : 50
+
+    // ── Higher TFs use CLOSED candles only ──────────────────────────────────
+    // For each TF compute EMA11/EMA25 and a trend summary with countdown.
+    const now = Date.now()
+    const buildTfSummary = (interval: IntervalKey, candles: Candle[]): TimeframeSummary => {
+      const closed = closedOnly(candles)
+      const ema11 = calcEMA(closed, 11)
+      const ema25 = calcEMA(closed, 25)
+      const lastClosedAt = closed[0]?.datetime ?? ''
+      const nextAt = nextCloseMs(interval, lastClosedAt)
+      return {
+        interval,
+        label: INTERVALS[interval].label,
+        trend: trendOf(ema11, ema25, pipMul),
+        ema11,
+        ema25,
+        lastClosedAt,
+        nextCloseAtMs: nextAt,
+        secondsUntilClose: Math.max(0, Math.floor((nextAt - now) / 1000)),
+      }
+    }
+
+    const timeframes: TimeframeSummary[] = [
+      buildTfSummary('30min', c30m),
+      buildTfSummary('1h', c1h),
+      buildTfSummary('4h', c4h),
+      buildTfSummary('8h', c8h),
+      buildTfSummary('1day', c1d),
+      buildTfSummary('1week', c1w),
+      buildTfSummary('1month', c1mo),
+    ]
+
+    // Trend EMAs from CLOSED candles for the criteria that already exist
+    const tf1h = timeframes.find((t) => t.interval === '1h')!
+    const tf4h = timeframes.find((t) => t.interval === '4h')!
+    const ema11_1h = tf1h.ema11
+    const ema25_1h = tf1h.ema25
+    const ema11_4h = tf4h.ema11
+    const ema25_4h = tf4h.ema25
 
     const isLong = direction === 'LONG'
 
-    // ── 1H en 4H zijn de zwaarste criteria ──────────────────────────────────
+    // ── Criteria definitions (1H + 4H now use closed-candle EMAs) ───────────
     const defaultCriteria: CriterionResult[] = [
       {
         key: 'ema_trend_1h',
@@ -119,8 +236,12 @@ export async function POST(request: NextRequest) {
         weight: 25,
         value: `EMA11: ${ema11_1h.toFixed(5)} | EMA25: ${ema25_1h.toFixed(5)}`,
         reason: isLong
-          ? ema11_1h > ema25_1h ? '1H trend is opwaarts — bevestigt LONG ✓' : '1H trend is NEERWAARTS — tegen de dagtrend'
-          : ema11_1h < ema25_1h ? '1H trend is neerwaarts — bevestigt SHORT ✓' : '1H trend is OPWAARTS — tegen de dagtrend',
+          ? ema11_1h > ema25_1h
+            ? '1H trend is opwaarts — bevestigt LONG ✓'
+            : '1H trend is NEERWAARTS — tegen de dagtrend'
+          : ema11_1h < ema25_1h
+            ? '1H trend is neerwaarts — bevestigt SHORT ✓'
+            : '1H trend is OPWAARTS — tegen de dagtrend',
       },
       {
         key: 'ema_trend_4h',
@@ -129,8 +250,12 @@ export async function POST(request: NextRequest) {
         weight: 25,
         value: `EMA11: ${ema11_4h.toFixed(5)} | EMA25: ${ema25_4h.toFixed(5)}`,
         reason: isLong
-          ? ema11_4h > ema25_4h ? '4H trend bevestigt richting ✓' : '4H trend CONFLICTEERT — sterke tegenwind'
-          : ema11_4h < ema25_4h ? '4H trend bevestigt richting ✓' : '4H trend CONFLICTEERT — sterke tegenwind',
+          ? ema11_4h > ema25_4h
+            ? '4H trend bevestigt richting ✓'
+            : '4H trend CONFLICTEERT — sterke tegenwind'
+          : ema11_4h < ema25_4h
+            ? '4H trend bevestigt richting ✓'
+            : '4H trend CONFLICTEERT — sterke tegenwind',
       },
       {
         key: 'ema_trend_5m',
@@ -139,8 +264,12 @@ export async function POST(request: NextRequest) {
         weight: 15,
         value: `EMA11: ${ema11_5m.toFixed(5)} | EMA25: ${ema25_5m.toFixed(5)}`,
         reason: isLong
-          ? ema11_5m > ema25_5m ? 'Korte trend mee ✓' : 'Korte trend tegen — maar 1H/4H bepalen de richting'
-          : ema11_5m < ema25_5m ? 'Korte trend mee ✓' : 'Korte trend tegen',
+          ? ema11_5m > ema25_5m
+            ? 'Korte trend mee ✓'
+            : 'Korte trend tegen — maar 1H/4H bepalen de richting'
+          : ema11_5m < ema25_5m
+            ? 'Korte trend mee ✓'
+            : 'Korte trend tegen',
       },
       {
         key: 'donchian_position',
@@ -179,27 +308,32 @@ export async function POST(request: NextRequest) {
     ]
 
     // Apply user-customized weights & enabled/disabled state
-    type UserCriterion = { key: string; label?: string; weight: number; enabled: boolean; autoGenerated?: boolean; patternKeys?: string[] }
+    type UserCriterion = {
+      key: string
+      label?: string
+      weight: number
+      enabled: boolean
+      autoGenerated?: boolean
+      patternKeys?: string[]
+    }
     const criteriaMap = new Map<string, UserCriterion>(
       (userCriteria as UserCriterion[]).map((c) => [c.key, c])
     )
 
-    // Merge default + any auto-generated user criteria
     const allCriteriaKeys = new Set([
-      ...defaultCriteria.map(c => c.key),
-      ...(userCriteria as UserCriterion[]).filter(c => c.autoGenerated).map((c) => c.key),
+      ...defaultCriteria.map((c) => c.key),
+      ...(userCriteria as UserCriterion[]).filter((c) => c.autoGenerated).map((c) => c.key),
     ])
 
     const finalCriteria: CriterionResult[] = []
 
     for (const key of allCriteriaKeys) {
       const custom = criteriaMap.get(key)
-      const base = defaultCriteria.find(c => c.key === key)
+      const base = defaultCriteria.find((c) => c.key === key)
 
       if (custom?.autoGenerated && custom.patternKeys) {
-        // Auto-generated pattern criterion: passes when ALL pattern criteria pass
-        const patternPass = custom.patternKeys.every(pk => {
-          const baseCrit = defaultCriteria.find(c => c.key === pk)
+        const patternPass = custom.patternKeys.every((pk) => {
+          const baseCrit = defaultCriteria.find((c) => c.key === pk)
           return baseCrit?.pass ?? false
         })
         finalCriteria.push({
@@ -224,9 +358,8 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Weighted score
     const totalWeight = finalCriteria.reduce((s, c) => s + c.weight, 0)
-    const earnedWeight = finalCriteria.filter(c => c.pass).reduce((s, c) => s + c.weight, 0)
+    const earnedWeight = finalCriteria.filter((c) => c.pass).reduce((s, c) => s + c.weight, 0)
     const score = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 0
 
     let recommendation: AnalysisResult['recommendation']
@@ -235,25 +368,33 @@ export async function POST(request: NextRequest) {
     else recommendation = 'NIET_DOEN'
 
     const snapshot: Record<string, number | boolean> = {
-      ema11_5m, ema25_5m,
-      ema11_1h, ema25_1h,
-      ema11_4h, ema25_4h,
+      ema11_5m,
+      ema25_5m,
+      ema11_1h,
+      ema25_1h,
+      ema11_4h,
+      ema25_4h,
       donchian_upper: donchian.upper,
       donchian_lower: donchian.lower,
       donchian_position: positionInChannel,
       ema_diff_pips: emaDiffPips,
       recent_move_pips: recentMovePips,
       score,
-      ...Object.fromEntries(finalCriteria.map(c => [`criteria_${c.key}`, c.pass])),
+      ...Object.fromEntries(finalCriteria.map((c) => [`criteria_${c.key}`, c.pass])),
     }
 
-    // Sort: red first (to show problems prominently), then green
     finalCriteria.sort((a, b) => {
       if (a.pass === b.pass) return b.weight - a.weight
       return a.pass ? 1 : -1
     })
 
-    return NextResponse.json({ score, recommendation, criteria: finalCriteria, snapshot })
+    return NextResponse.json({
+      score,
+      recommendation,
+      criteria: finalCriteria,
+      snapshot,
+      timeframes,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Analyse mislukt'
     return NextResponse.json({ error: message }, { status: 500 })

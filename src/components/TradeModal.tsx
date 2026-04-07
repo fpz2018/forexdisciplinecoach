@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useApp } from '@/lib/context/AppContext'
 import { calculateStopLoss, calculateTakeProfit, calculateLotSize, getPipValue, cn } from '@/lib/utils'
 import { ensureCriteriaExist } from '@/lib/learning'
-import type { CriterionResult, AnalysisResult } from '@/app/api/analyze/route'
+import type { CriterionResult, AnalysisResult, TimeframeSummary } from '@/app/api/analyze/route'
 
 interface TradeModalProps {
   open: boolean
@@ -296,6 +296,11 @@ export default function TradeModal({ open, onClose }: TradeModalProps) {
                   {/* Score + Recommendation */}
                   <AnalysisHeader analysis={analysis} direction={direction} pair={pair} />
 
+                  {/* Higher timeframes overview */}
+                  {analysis.timeframes && analysis.timeframes.length > 0 && (
+                    <TimeframesPanel timeframes={analysis.timeframes} />
+                  )}
+
                   {/* Criteria breakdown */}
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Analyse per criterium</p>
@@ -446,6 +451,59 @@ function AnalysisHeader({ analysis, direction, pair }: { analysis: AnalysisResul
             style={{ width: `${analysis.score}%` }}
           />
         </div>
+      </div>
+    </div>
+  )
+}
+
+function TimeframesPanel({ timeframes }: { timeframes: TimeframeSummary[] }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const formatCountdown = (msUntil: number): string => {
+    if (msUntil <= 0) return 'sluit nu'
+    const total = Math.floor(msUntil / 1000)
+    const days = Math.floor(total / 86400)
+    const hours = Math.floor((total % 86400) / 3600)
+    const minutes = Math.floor((total % 3600) / 60)
+    const seconds = total % 60
+    if (days >= 7) return `${Math.floor(days / 7)}w ${days % 7}d`
+    if (days > 0) return `${days}d ${hours}u`
+    if (hours > 0) return `${hours}u ${minutes}m`
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
+  }
+
+  return (
+    <div className="border border-slate-800 bg-slate-800/40 rounded-xl p-3">
+      <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">
+        Hogere timeframes <span className="text-slate-600 normal-case">(gesloten candles)</span>
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {timeframes.map((tf) => {
+          const msUntil = tf.nextCloseAtMs - now
+          const arrow = tf.trend === 'UP' ? '▲' : tf.trend === 'DOWN' ? '▼' : '─'
+          const color =
+            tf.trend === 'UP'
+              ? 'text-emerald-400'
+              : tf.trend === 'DOWN'
+                ? 'text-red-400'
+                : 'text-slate-500'
+          return (
+            <div
+              key={tf.interval}
+              className="flex items-center justify-between bg-slate-900/60 rounded-lg px-2.5 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn('text-base font-bold', color)}>{arrow}</span>
+                <span className="text-xs font-semibold text-slate-300">{tf.label}</span>
+              </div>
+              <span className="text-[10px] text-slate-500 font-mono">{formatCountdown(msUntil)}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
